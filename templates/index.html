@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Viewer</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">  
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row vh-100">
+            <!-- Sidebar -->
+            <div class="col-md-4 border-end p-0">
+                <div class="search-container">
+                    <h4 class="mb-3">Email Search</h4>
+                    <form id="search-form">
+                        <div class="input-group">
+                            <input type="text" id="search-query" class="form-control" placeholder="Search emails..." required>
+                            <button class="btn btn-primary" type="submit">Search</button>
+                        </div>
+                    </form>
+                </div>
+                <div class="check-emails-container">
+                    <button id="check-emails-btn" class="btn btn-success w-100">
+                        <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                        Check for New Emails
+                    </button>
+                </div>
+                <div id="results" class="d-none">
+                    <!-- Search results will appear here -->
+                </div>
+                <div class="recent-emails">
+                    <h4 class="mb-3">Recent Emails</h4>
+                    {% if emails %}
+                        <div class="list-group">
+                        {% for email in emails %}
+                            <div class="list-group-item result-item" data-path="{{ email.path }}">
+                                <h5 class="mb-1">{{ email.subject }}</h5>
+                                <p class="mb-1"><strong>From:</strong> {{ email.sender }}</p>
+                                <small class="text-muted">{{ email.datetime_received }}</small>
+                            </div>
+                        {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="text-center">No emails found.</p>
+                    {% endif %}
+                </div>
+            </div>
+            <!-- Content Area -->
+            <div class="col-md-8">
+                <div id="email-content">
+                    <!-- Email content will appear here -->
+                </div>
+                <div class="attachments-section mt-3">
+                    <h5 class="attachments-header">
+                        <i class="bi bi-paperclip"></i> Attachments
+                    </h5>
+                    <div id="attachment-list" class="attachment-container">
+                        <!-- Attachments will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Custom JS -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script>
+    document.getElementById('check-emails-btn').addEventListener('click', async function() {
+        const button = this;
+        const spinner = button.querySelector('.spinner-border');
+        
+        // Disable button and show spinner
+        button.disabled = true;
+        spinner.classList.remove('d-none');
+        
+        try {
+            const response = await fetch('/check-emails', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                // Refresh the page to show new emails
+                window.location.reload();
+            } else {
+                alert('Error checking emails: ' + data.message);
+            }
+        } catch (error) {
+            alert('Error checking emails: ' + error.message);
+        } finally {
+            // Re-enable button and hide spinner
+            button.disabled = false;
+            spinner.classList.add('d-none');
+        }
+    });
+
+    // Update the attachment loading JavaScript
+    function displayAttachments(emailId) {
+        const attachmentList = document.getElementById('attachment-list');
+        attachmentList.innerHTML = '<p class="text-center"><i>Loading attachments...</i></p>';
+
+        fetch(`/list-attachments/${emailId}`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.attachments.length === 0) {
+                    attachmentList.innerHTML = '<p class="text-muted">No attachments</p>';
+                    return;
+                }
+                
+                attachmentList.innerHTML = data.attachments.map(att => `
+                    <a href="${att.path}" class="attachment-item" download>
+                        <i class="bi bi-file-earmark"></i>
+                        <span class="ms-2">${att.filename}</span>
+                        <small class="text-muted ms-2">(${formatBytes(att.size)})</small>
+                    </a>
+                `).join('');
+            })
+            .catch(error => {
+                console.error('Error loading attachments:', error);
+                attachmentList.innerHTML = '<p class="text-danger">Error loading attachments</p>';
+            });
+    }
+
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./gpg2:/app/gpg2
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_RUN_HOST=0.0.0.0
+      - FLASK_DEBUG=1
+      - EXCHANGE_EMAIL=${EXCHANGE_EMAIL}
+      - EXCHANGE_DOMAIN_USERNAME=${EXCHANGE_DOMAIN_USERNAME}
+      - EXCHANGE_PASSWORD=${EXCHANGE_PASSWORD}
+      - EXCHANGE_SERVER=${EXCHANGE_SERVER}
+      - EXCHANGE_VERSION=${EXCHANGE_VERSION}
+      - OUTPUT_DIR=${OUTPUT_DIR}
+      - TIMEZONE=${TIMEZONE}
+    depends_on:
+      - redis
+
+  redis:
+    image: "redis:alpine"

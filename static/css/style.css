@@ -1,0 +1,198 @@
+/* static/css/style.css */
+body {
+    font-family: Arial, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+}
+
+#results {
+    margin-top: 20px;
+    overflow-y: auto;
+    max-height: calc(100vh - 150px);
+}
+
+.result-item {
+    padding: 15px;
+    border-bottom: 1px solid #dee2e6;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.result-item:hover {
+    background-color: #f8f9fa;
+}
+
+.result-item.active {
+    background-color: #e9ecef;
+}
+
+.email-snippet {
+    color: #6c757d;
+    font-size: 0.9em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+#email-content {
+    height: calc(100vh - 30px);
+    overflow-y: auto;
+    padding: 20px;
+    background-color: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+}
+
+.search-container {
+    position: sticky;
+    top: 0;
+    background-color: #f8f9fa;
+    padding: 15px;
+    z-index: 1000;
+}
+
+/* Loading spinner */
+.loading {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid #f3f3f3;
+    border-radius: 50%;
+    border-top: 3px solid #3498db;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.check-emails-container {
+    margin-bottom: 20px;
+}
+
+#check-emails-btn {
+    position: relative;
+}
+
+#check-emails-btn .spinner-border {
+    margin-right: 8px;
+}
+
+#check-emails-btn:disabled {
+    opacity: 0.7;
+}
+
+.col-md-4 {
+    height: 100vh;
+    overflow-y: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.search-container {
+    flex-shrink: 0;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.check-emails-container {
+    flex-shrink: 0;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.recent-emails {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 15px;
+}
+
+#results {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 15px;
+}
+
+/* Add to static/css/style.css */
+
+.attachments-section {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    width: 66.666%;
+    background: white;
+    border-top: 1px solid #dee2e6;
+    padding: 1rem;
+    z-index: 1000;
+}
+
+
+.attachments-header {
+    color: #495057;
+    font-size: 1.1rem;
+    margin-bottom: 0.75rem;
+}
+
+
+
+.attachment-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    max-height: 120px;
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+
+
+
+
+
+
+.attachment-item {
+    display: inline-flex;
+    align-items: center;
+    margin: 0.25rem;
+    padding: 0.5rem 1rem;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    color: #212529;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.attachment-item:hover {
+    background: #e9ecef;
+    text-decoration: none;
+    color: #0056b3;
+}
+
+.attachment-icon {
+    color: #6c757d;
+}
+
+/* Make sure email content doesn't push attachments too far down */
+
+.email-content {
+    margin-bottom: 150px; /* Make space for attachments section *   /
+    padding-bottom: 1rem;
+}
+
+
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .email-content {
+        max-height: calc(100vh - 400px);
+    }
+    
+    .attachments-section {
+        margin-bottom: 2rem;
+    }
+}
