@@ -19,7 +19,7 @@ EXCHANGE_SERVER='london.autochlor.net'
 EXCHANGE_VERSION='Exchange2016'
 OUTPUT_DIR='gpg2/'
 TIMEZONE='US/Eastern'
-DAYS_AGO=10
+DAYS_AGO=2
 # Ensure the email directory exists and is readable
 if not os.path.exists('gpg2'):
     os.makedirs('gpg2')
@@ -51,7 +51,7 @@ def process_email(account, email_folder, output_dir, time_frame):
                 yield process_email_item(account, item, output_dir)
     except ErrorTooManyObjectsOpened as e:
         logging.error(f"Too many objects error: {e}")
-@pysnooper.snoop("ouput.log")
+# @pysnooper.snoop("ouput.log")
 def process_email_item(account, item, output_dir):
     """Process a single email item."""
     print()
@@ -256,27 +256,27 @@ def view(filename):
         logging.error(f"Error reading email file: {str(e)}")
         abort(500)
 
-# @app.route('/attachments/<path:filename>')
-# def download_attachment(filename):
-#     """Enhanced route to download attachments with security checks"""
-#     if '..' in filename or filename.startswith('/'):
-#         abort(400, description="Invalid file path")
+@app.route('/attachments/<path:filename>')
+def download_attachment(filename):
+    """Enhanced route to download attachments with security checks"""
+    if '..' in filename or filename.startswith('/'):
+        abort(400, description="Invalid file path")
         
-#     full_path = os.path.join(EMAIL_DIR, filename)
-#     full_path = os.path.normpath(full_path)
+    full_path = os.path.join(EMAIL_DIR, filename)
+    full_path = os.path.normpath(full_path)
     
-#     if not full_path.startswith(os.path.normpath(EMAIL_DIR)):
-#         abort(403)  # Forbidden if trying to access outside EMAIL_DIR
+    if not full_path.startswith(os.path.normpath(EMAIL_DIR)):
+        abort(403)  # Forbidden if trying to access outside EMAIL_DIR
         
-#     try:
-#         directory = os.path.dirname(full_path)
-#         file = os.path.basename(full_path)
-#         return send_from_directory(directory, file, as_attachment=True)
-#     except FileNotFoundError:
-#         abort(404, description="Attachment not found")
-#     except Exception as e:
-#         logging.error(f"Error downloading attachment: {str(e)}")
-#         abort(500)
+    try:
+        directory = os.path.dirname(full_path)
+        file = os.path.basename(full_path)
+        return send_from_directory(directory, file, as_attachment=True)
+    except FileNotFoundError:
+        abort(404, description="Attachment not found")
+    except Exception as e:
+        logging.error(f"Error downloading attachment: {str(e)}")
+        abort(500)
 
 @app.route('/list-attachments/<path:email_id>')
 def list_attachments(email_id):
@@ -302,14 +302,14 @@ def list_attachments(email_id):
         logging.error(f"Error listing attachments: {str(e)}")
         return jsonify({'attachments': []})
 
-@app.route('/attachments/<path:sender_name>/<path:filename>')
-def download_attachment(sender_name, filename):
-    try:
-        directory = os.path.join(EMAIL_DIR, sender_name)
-        return send_from_directory(directory, filename, as_attachment=True)
-    except Exception as e:
-        logging.error(f"Error downloading attachment: {str(e)}")
-        abort(404)
+# @app.route('/attachments/<path:sender_name>/<path:filename>')
+# def download_attachment(sender_name, filename):
+#     try:
+#         directory = os.path.join(EMAIL_DIR, sender_name)
+#         return send_from_directory(directory, filename, as_attachment=True)
+#     except Exception as e:
+#         logging.error(f"Error downloading attachment: {str(e)}")
+#         abort(404)
 
 @app.route('/check-emails', methods=['POST'])
 def check_emails():
