@@ -5,6 +5,5 @@ build/
 dist/
 wheels/
 *.egg-info
-gpg2/
 # Virtual environments
 .venv
