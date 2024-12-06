@@ -79,12 +79,14 @@ def process_email(account, email_folder, output_dir, time_frame):
         logging.error(f"Too many objects error: {e}")
 # @pysnooper.snoop("ouput.log")
 def process_email_item(account, item, output_dir):
+    # Generate a unique email_id from the datetime and subject
+    email_id = f"{item.datetime_received.strftime('%Y%m%d%H%M%S')}_{hash(item.subject)}"
+    
     recipient_name = item.to_recipients[0].name if item.to_recipients else 'Unknown_Recipient'
     subject = sanitize_filename(item.subject) if item.subject else 'No_Subject'
     email_out = f"to_{recipient_name} - {subject} - {item.datetime_received.strftime('%I-%M%p %m-%d%Y')}"
     email_filename = os.path.join(EMAIL_DIR, f"{email_out}.html")
     attachment_dir = os.path.join(EMAIL_DIR, email_id + "_attachments")
-    # email_filename = os.path.join(output_dir, f"{email_out}.html")
     try:
         with open(email_filename, 'w', encoding='utf-8') as f:
             f.write(f"<html><body>\n")
