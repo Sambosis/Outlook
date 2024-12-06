@@ -71,7 +71,8 @@ $(document).ready(function () {
                 $('.result-item').removeClass('active');
                 $clickedItem.addClass('active');
                 // Load attachments after email content is loaded
-                let emailId = filePath.split('/').slice(0, -1).join('/');
+                let emailId = filePath.replace('.html', '');
+                
                 displayAttachments(emailId);
             },
             error: function (xhr, status, error) {

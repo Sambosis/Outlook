@@ -1,3 +1,4 @@
+# app.py    
 import os
 import re
 import logging
@@ -8,28 +9,53 @@ from exchangelib.errors import ErrorTooManyObjectsOpened
 import pytz
 from pathlib import Path
 from icecream import ic 
-# import pysnooper
-# import htppx
-# At the start of your Flask app
-import os
-EXCHANGE_EMAIL='gpgaskin@autochlor.com'
-EXCHANGE_DOMAIN_USERNAME='autochlor\\gpgaskin'
-EXCHANGE_PASSWORD='redtag19'
-EXCHANGE_SERVER='london.autochlor.net'
-EXCHANGE_VERSION='Exchange2016'
-OUTPUT_DIR='gpg2/'
-TIMEZONE='US/Eastern'
-DAYS_AGO=2
-# Ensure the email directory exists and is readable
-if not os.path.exists('gpg2'):
-    os.makedirs('gpg2')
-app = Flask(__name__, static_folder='static')
+from waitress import serve
+from dotenv import load_dotenv
+import sys
+
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Get environment variables with validation
+def get_env_var(var_name):
+    # Get the absolute path of the .env file
+    env_path = Path(__file__).resolve().parent / '.env'
+    # logger.debug(f"Loading .env file from: {env_path}")
+    
+    # Force reload of .env file
+    load_dotenv(env_path, override=True)
+    
+    value = os.getenv(var_name)
+    logger.debug(f"Variable {var_name} = {value}")
+    
+    if value is None:
+        raise ValueError(f"Missing environment variable: {var_name}")
+    return value.strip("'\"")  # Remove any quotes
+
+try:
+    logger.debug("Starting environment variable loading...")
+    EXCHANGE_EMAIL = get_env_var('EXCHANGE_EMAIL')
+    EXCHANGE_DOMAIN_USERNAME = get_env_var('EXCHANGE_DOMAIN_USERNAME')
+    EXCHANGE_PASSWORD = get_env_var('EXCHANGE_PASSWORD')
+    EXCHANGE_SERVER = get_env_var('EXCHANGE_SERVER')
+    EXCHANGE_VERSION = get_env_var('EXCHANGE_VERSION')
+    OUTPUT_DIR = get_env_var('OUTPUT_DIR')
+    TIMEZONE = get_env_var('TIMEZONE')
+    DAYS_AGO = int(get_env_var('DAYS_AGO'))
+    logger.debug("Finished loading environment variables")
+except ValueError as e:
+    logger.error(f"Environment configuration error: {str(e)}")
+    raise
+
+# Ensure output directory exists
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+app = Flask(__name__, static_folder='static')
 
 # Directory where emails are stored
 EMAIL_DIR = 'gpg2/'  # Ensure this path is correct
-
+# sys.exit(1)
 def sanitize_filename(filename):
     """Sanitize the filename by removing or replacing invalid characters."""
     print()
@@ -53,15 +79,12 @@ def process_email(account, email_folder, output_dir, time_frame):
         logging.error(f"Too many objects error: {e}")
 # @pysnooper.snoop("ouput.log")
 def process_email_item(account, item, output_dir):
-    """Process a single email item."""
-    print()
     recipient_name = item.to_recipients[0].name if item.to_recipients else 'Unknown_Recipient'
     subject = sanitize_filename(item.subject) if item.subject else 'No_Subject'
     email_out = f"to_{recipient_name} - {subject} - {item.datetime_received.strftime('%I-%M%p %m-%d%Y')}"
-    
-    # Path relative to EMAIL_DIR
-    email_filename = os.path.join(output_dir, f"{email_out}.html")
-    
+    email_filename = os.path.join(EMAIL_DIR, f"{email_out}.html")
+    attachment_dir = os.path.join(EMAIL_DIR, email_id + "_attachments")
+    # email_filename = os.path.join(output_dir, f"{email_out}.html")
     try:
         with open(email_filename, 'w', encoding='utf-8') as f:
             f.write(f"<html><body>\n")
@@ -75,9 +98,9 @@ def process_email_item(account, item, output_dir):
             f.write(f"</body></html>\n")
     except Exception as e:
         logging.error(f"Error writing email file {email_filename}: {str(e)}")
-    
-    # Save attachments
-    attachment_dir = os.path.join(output_dir, sanitize_filename(recipient_name))
+
+
+
     Path(attachment_dir).mkdir(parents=True, exist_ok=True)
     for attachment in item.attachments:
         if isinstance(attachment, FileAttachment):
@@ -92,7 +115,10 @@ def process_email_item(account, item, output_dir):
             try:
                 attached_item = attachment.item
                 attached_subject = sanitize_filename(attached_item.subject)
-                attached_email_filename = os.path.join(attachment_dir, f"attached_email_{attached_subject}_{attached_item.datetime_received.strftime('%Y%m%d%H%M%S')}.html")
+                attached_email_filename = os.path.join(
+                    attachment_dir,
+                    f"attached_email_{attached_subject}_{attached_item.datetime_received.strftime('%Y%m%d%H%M%S')}.html"
+                )
                 with open(attached_email_filename, 'w', encoding='utf-8') as f:
                     f.write(f"<html><body>\n")
                     f.write(f"<h1>Subject: {attached_item.subject}</h1>\n")
@@ -103,8 +129,8 @@ def process_email_item(account, item, output_dir):
                     f.write(f"</body></html>\n")
             except Exception as e:
                 logging.error(f"Error saving attached email: {str(e)}")
-    
-    return email_filename  # Return the path for reference
+
+    return email_filename
 
 def setup_exchange_connection():
     """Setup Exchange connection using environment variables."""
@@ -240,7 +266,7 @@ def view(filename):
         # Ensure the path is within EMAIL_DIR
         full_path = os.path.join(EMAIL_DIR, filename)
         full_path = os.path.normpath(full_path)
-        
+        print(full_path)
         if not full_path.startswith(os.path.normpath(EMAIL_DIR)):
             abort(403)  # Forbidden if trying to access outside EMAIL_DIR
             
@@ -280,21 +306,20 @@ def download_attachment(filename):
 
 @app.route('/list-attachments/<path:email_id>')
 def list_attachments(email_id):
+    logging.info(f"Listing attachments for email ID: {email_id}")
     try:
-        # Get the sender name from the email path
-        from_name = email_id.split('_')[1]  # Extract name from "from_Name_Subject_DateTime"
-        attachment_dir = os.path.join(EMAIL_DIR, from_name)
+        attachment_dir = os.path.join(EMAIL_DIR, email_id + "_attachments")
         
         if not os.path.exists(attachment_dir):
             return jsonify({'attachments': []})
-            
+
         attachments = []
         for file in os.listdir(attachment_dir):
             file_path = os.path.join(attachment_dir, file)
             if os.path.isfile(file_path) and not file.endswith('.html'):
                 attachments.append({
                     'filename': file,
-                    'path': f'/attachments/{from_name}/{file}',
+                    'path': f'/attachments/{email_id + "_attachments"}/{file}',
                     'size': os.path.getsize(file_path)
                 })
         return jsonify({'attachments': attachments})
@@ -348,4 +373,5 @@ if __name__ == '__main__':
         logging.error(f"Failed to setup Exchange connection or process emails: {str(e)}")
     
     print()
-    app.run(debug=True)
+    # app.run(debug=True)
+    serve(app, host='127.0.0.1', port=8080)
