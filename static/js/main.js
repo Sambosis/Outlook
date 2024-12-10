@@ -35,26 +35,32 @@ $(document).ready(function () {
                     return;
                 }
 
-                    response.results.forEach(function (item) {
-                        let resultHtml = `
-                            <div class="result-item" data-path="${item.path}">
-                                <h5 class="mb-1">${item.name}</h5>
-                                <p class="email-snippet mb-0">${item.snippet}</p>
-                            </div>
-                        `;
-                        $('#results').append(resultHtml);
-                    });
-                },
-                error: function (error) {
-                    console.error('Search error:', error); // Debug log
-                    $('#results').html(`
-                        <div class="alert alert-danger">
-                            Error performing search: ${error}
+                // Update search results display to include datetime
+                response.results.forEach(function (item) {
+                    // Extract datetime from filename format "...- HH-MMAM/PM MM-DDYYYY.html"
+                    let datetimeMatch = item.name.match(/(\d{2}-\d{2}[AP]M \d{2}-\d{2}\d{4})\.html$/);
+                    let datetime = datetimeMatch ? datetimeMatch[1] : '';
+                    
+                    let resultHtml = `
+                        <div class="result-item" data-path="${item.path}">
+                            <h5 class="mb-1">${item.name}</h5>
+                            <p class="email-snippet mb-0">${item.snippet}</p>
+                            <small class="text-muted">${datetime}</small>
                         </div>
-                    `);
-                }
-            });
+                    `;
+                    $('#results').append(resultHtml);
+                });
+            },
+            error: function (error) {
+                console.error('Search error:', error); // Debug log
+                $('#results').html(`
+                    <div class="alert alert-danger">
+                        Error performing search: ${error}
+                    </div>
+                `);
+            }
         });
+    });
 
     // Delegate event handler for result items (works for dynamically added elements)
     $(document).on('click', '.result-item', function () {
@@ -82,10 +88,6 @@ $(document).ready(function () {
             }
         });
     });
-
-
-
-
 
     // Add a way to go back to recent emails
     $('<button>')
