@@ -243,19 +243,35 @@ def search():
                         with open(file_path, 'r', encoding='utf-8') as f:
                             content = f.read()
                             if query.lower() in content.lower():
-                                print(f"Found match in: {file_path}")  # Debug print
+                                # Extract datetime like in index route
+                                datetime_match = re.search(r'<p><strong>Received:</strong> (.*?)</p>', content)
+                                if datetime_match:
+                                    try:
+                                        dt = datetime.fromisoformat(datetime_match.group(1).replace('Z', '+00:00'))
+                                    except ValueError:
+                                        dt = datetime.fromtimestamp(os.path.getmtime(file_path))
+                                else:
+                                    dt = datetime.fromtimestamp(os.path.getmtime(file_path))
+
                                 snippet_start = content.lower().find(query.lower())
                                 snippet = content[max(0, snippet_start-50):snippet_start+150] + '...'
                                 snippet = re.sub('<[^<]+?>', '', snippet)
                                 results.append({
                                     'path': relative_path.replace('\\', '/'),
                                     'name': file,
-                                    'snippet': snippet
+                                    'snippet': snippet,
+                                    'datetime': dt
                                 })
                     except Exception as e:
-                        print(f"Error reading file {file_path}: {str(e)}")  # Debug print
-                        
-        print(f"Found {len(results)} results")  # Debug print
+                        print(f"Error reading file {file_path}: {str(e)}")
+
+        # Sort results by datetime in descending order
+        results.sort(key=lambda x: x['datetime'], reverse=True)
+        
+        # Remove datetime from results before sending (not needed by frontend)
+        for result in results:
+            del result['datetime']
+            
         return jsonify({"results": results})
     
     except Exception as e:
