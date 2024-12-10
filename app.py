@@ -248,10 +248,11 @@ def search():
                                 if datetime_match:
                                     try:
                                         dt = datetime.fromisoformat(datetime_match.group(1).replace('Z', '+00:00'))
+                                        formatted_dt = dt.strftime('%m/%d/%Y %I:%M %p')
                                     except ValueError:
-                                        dt = datetime.fromtimestamp(os.path.getmtime(file_path))
+                                        formatted_dt = ''
                                 else:
-                                    dt = datetime.fromtimestamp(os.path.getmtime(file_path))
+                                    formatted_dt = ''
 
                                 snippet_start = content.lower().find(query.lower())
                                 snippet = content[max(0, snippet_start-50):snippet_start+150] + '...'
@@ -260,13 +261,13 @@ def search():
                                     'path': relative_path.replace('\\', '/'),
                                     'name': file,
                                     'snippet': snippet,
-                                    'datetime': dt
+                                    'datetime': formatted_dt
                                 })
                     except Exception as e:
                         print(f"Error reading file {file_path}: {str(e)}")
 
         # Sort results by datetime in descending order
-        results.sort(key=lambda x: x['datetime'], reverse=True)
+        results.sort(key=lambda x: x.get('datetime', ''), reverse=True)
         
         # Remove datetime from results before sending (not needed by frontend)
         for result in results:
