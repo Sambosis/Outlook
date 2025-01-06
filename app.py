@@ -210,7 +210,7 @@ def index():
         recent_emails.sort(key=lambda x: x['datetime_received'], reverse=True)
         
         # Take only the 10 most recent emails
-        recent_emails = recent_emails[:25]
+        recent_emails = recent_emails[:100]
         
         # Format the datetime for display
         for email in recent_emails:
