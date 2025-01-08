@@ -67,77 +67,75 @@ def sanitize_filename(filename):
     
     return filename
 
-# Fetch sent emails from the last 30 days
-for item in account.sent.filter(datetime_received__gte=sent_time_frame).order_by('-datetime_received'):
-    if isinstance(item, Message):
-        # Extract recipient email addresses
-        recipient_name = item.to_recipients[0].name
-        print(f"Recipient Name: {recipient_name}")
+def process_email(account, email_folder, output_dir, time_frame):
+    """Process emails in the specified folder."""
+    try:
+        for item in email_folder.filter(datetime_received__gte=time_frame).order_by('-datetime_received'):
+            if isinstance(item, Message):
+                yield process_email_item(account, item, output_dir)
+    except ErrorTooManyObjectsOpened as e:
+        logging.error(f"Too many objects error: {e}")
 
-        try:
+def process_email_item(account, item, output_dir):
+    """Process a single email item."""
+    recipient_name = sanitize_filename(item.to_recipients[0].name) if item.to_recipients else 'Unknown_Recipient'
+    subject = sanitize_filename(item.subject) if item.subject else 'No_Subject'
+    received_time = item.datetime_received.strftime('%m-%d-%Y_%I-%M%p')
+    email_out = f"to_{recipient_name} - {subject} - {received_time}"
+    
+    # Save the email contents to a file named email.html
+    email_filename = f"{output_dir}{email_out}.html"
+    try:
+        with open(email_filename, 'w', encoding='utf-8') as f:
+            f.write(f"<html><body>\n")
+            f.write(f"<h1>Subject: {item.subject}</h1>\n")
+            f.write(f"<p><strong>Received:</strong> {item.datetime_received}</p>\n")
+            f.write(f"<p><strong>Sender:</strong> {item.sender.email_address}</p>\n")
             to_addresses = ', '.join([recipient.email_address for recipient in item.to_recipients if recipient.email_address])
-        except AttributeError:
-            to_addresses = 'Unknown'
+            f.write(f"<p><strong>To:</strong> {to_addresses}</p>\n")
+            f.write(f"<p><strong>Body:</strong></p>\n")
+            f.write(f"{item.body}\n")
+            f.write(f"</body></html>\n")
+    except Exception as e:
+        print(f"Error writing email file {email_filename}: {str(e)}")
+    
+    print(f"Email saved to {email_out}.html")
+    attachment_dir = f"{output_dir}{email_out}_attachments/"
+    # Create the attachment directory
+    os.makedirs(attachment_dir, exist_ok=True)
+    
+    # Save attachments
+    for attachment in item.attachments:
+        if isinstance(attachment, FileAttachment):
+            try:
+                safe_attachment_name = sanitize_filename(attachment.name)
+                attachment_filename = f"{attachment_dir}{safe_attachment_name}"
+                with open(attachment_filename, 'wb') as f:
+                    f.write(attachment.content)
+                print(f"Saved attachment: {attachment_filename}")
+            except Exception as e:
+                print(f"Error saving attachment {attachment.name}: {str(e)}")
+        elif isinstance(attachment, ItemAttachment):
+            try:
+                attached_item = attachment.item
+                attached_subject = sanitize_filename(attached_item.subject)
+                attached_received_time = attached_item.datetime_received.strftime('%m-%d-%Y_%I-%M%p')
+                attached_email_filename = f"{attachment_dir}attached_{attached_subject}_{attached_received_time}.html"
+                with open(attached_email_filename, 'w', encoding='utf-8') as f:
+                    f.write(f"<html><body>\n")
+                    f.write(f"<h1>Subject: {attached_item.subject}</h1>\n")
+                    f.write(f"<p><strong>Received:</strong> {attached_item.datetime_received}</p>\n")
+                    f.write(f"<p><strong>Sender:</strong> {attached_item.sender.email_address}</p>\n")
+                    f.write(f"<p><strong>Body:</strong></p>\n")
+                    f.write(f"{attached_item.body}\n")
+                    f.write(f"</body></html>\n")
+                print(f"Saved attached email: {attached_email_filename}")
+            except Exception as e:
+                print(f"Error saving attached email: {str(e)}")
 
-        try:
-            subject = sanitize_filename(item.subject) if item.subject else 'No_Subject'
-            recipient_name = sanitize_filename(recipient_name) if recipient_name else 'Unknown_Recipient'
-            email_out = f"{output_dir}to_{recipient_name} - {subject} - {item.datetime_received.strftime('%I-%M%p %m-%d%Y')}"
-        except Exception as e:
-            print(f"Error processing filename: {str(e)}")
-            email_out = f"{output_dir}unnamed_email_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-
-        # Save the email contents to a file named email.html
-        email_filename = f"{email_out}.html"
-        try:
-            with open(email_filename, 'w', encoding='utf-8') as f:
-                f.write(f"<html><body>\n")
-                f.write(f"<h1>Subject: {item.subject}</h1>\n")
-                f.write(f"<p><strong>Received:</strong> {item.datetime_received}</p>\n")
-                f.write(f"<p><strong>Sender:</strong> {item.sender.email_address}</p>\n")
-                f.write(f"<p><strong>To:</strong> {to_addresses}</p>\n")
-                f.write(f"<p><strong>Body:</strong></p>\n")
-                f.write(f"{item.body}\n")
-                f.write(f"</body></html>\n")
-        except Exception as e:
-            print(f"Error writing email file {email_filename}: {str(e)}")
-
-        print(f"Email  to {email_out}")
-        attachment_dir = f"{output_dir}{recipient_name}/"
-        # make the dir if it's not
-        os.makedirs(attachment_dir, exist_ok=True)
-
-        # Save attachments
-        for attachment in item.attachments:
-            if isinstance(attachment, FileAttachment):
-                try:
-                    safe_attachment_name = sanitize_filename(attachment.name)
-                    attachment_filename = f"{attachment_dir}{safe_attachment_name}"
-                    with open(attachment_filename, 'wb') as f:
-                        f.write(attachment.content)
-                except Exception as e:
-                    print(f"Error saving attachment {attachment.name}: {str(e)}")
-
-            elif isinstance(attachment, ItemAttachment):
-                os.makedirs(attachment_dir, exist_ok=True)
-
-                # If the attachment is an email item, save its contents similarly
-                try:
-                    attached_item = attachment.item
-                    attached_subject = sanitize_filename(attached_item.subject)
-                    attached_email_filename = f"{attachment_dir}attached_email_{attached_subject}_{attached_item.datetime_received.strftime('%Y%m%d%H%M%S')}.html"
-                    with open(attached_email_filename, 'w', encoding='utf-8') as f:
-                        f.write(f"<html><body>\n")
-                        f.write(f"<h1>Subject: {attached_item.subject}</h1>\n")
-                        f.write(f"<p><strong>Received:</strong> {attached_item.datetime_received}</p>\n")
-                        f.write(f"<p><strong>Sender:</strong> {attached_item.sender.email_address}</p>\n")
-                        f.write(f"<p><strong>Body:</strong></p>\n")
-                        f.write(f"{attached_item.body}\n")
-                        f.write(f"</body></html>\n")
-                except Exception as e:
-                    print(f"Error saving attached email: {str(e)}")
-
-                print(f"ItemA to {attached_email_filename}")
+# Fetch sent emails from the last 30 days
+for _ in process_email(account, account.sent, output_dir, sent_time_frame):
+    pass
 
 output_dir = f'gpg2/'
 os.makedirs(output_dir, exist_ok=True)

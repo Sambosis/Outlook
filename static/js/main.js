@@ -77,9 +77,8 @@ $(document).ready(function () {
                 $('.result-item').removeClass('active');
                 $clickedItem.addClass('active');
                 // Load attachments after email content is loaded
-                let emailId = filePath.replace('.html', '');
-                
-                displayAttachments(emailId);
+                let emailBase = filePath.replace('.html', '');
+                displayAttachments(emailBase); // Update to use emailBase instead of emailId
             },
             error: function (xhr, status, error) {
                 console.error('Error loading email:', error);
@@ -88,6 +87,30 @@ $(document).ready(function () {
             }
         });
     });
+
+    // Function to display attachments
+    function displayAttachments(emailBase) {
+        $.ajax({
+            url: '/list-attachments/' + encodeURIComponent(emailBase + '.html'),
+            method: 'GET',
+            success: function (response) {
+                if (response.attachments && response.attachments.length > 0) {
+                    let attachmentsHtml = '<h4>Attachments:</h4><ul>';
+                    response.attachments.forEach(function (attachment) {
+                        attachmentsHtml += `<li><a href="${attachment.path}" download>${attachment.filename}</a></li>`;
+                    });
+                    attachmentsHtml += '</ul>';
+                    $('#attachment-list').html(attachmentsHtml);
+                } else {
+                    $('#attachment-list').html('<p>No attachments found.</p>');
+                }
+            },
+            error: function (error) {
+                console.error('Error fetching attachments:', error);
+                $('#attachment-list').html('<p>Error loading attachments.</p>');
+            }
+        });
+    }
 
     // Add a way to go back to recent emails
     $('<button>')

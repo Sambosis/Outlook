@@ -39,6 +39,21 @@ def sanitize_filename(filename):
         filename = filename[:245]
     return filename
 
+def replace_cid_urls(body, email_out, output_dir):
+    """
+    Replace 'cid:' URLs in the email body with valid HTTP URLs pointing to attachment files.
+    """
+    def cid_replacer(match):
+        cid = match.group(1)
+        # Assuming the cid corresponds to the attachment filename
+        attachment_url = f"/attachments/{email_out}_attachments/{cid}"
+        return f'src="{attachment_url}"'
+    
+    # Replace all src="cid:filename" with src="/attachments/.../filename"
+    pattern = r'src=["\']cid:(.*?)["\']'
+    replaced_body = re.sub(pattern, cid_replacer, body, flags=re.IGNORECASE)
+    return replaced_body
+
 def process_email(account, email_folder, output_dir, time_frame):
     """Process emails in the specified folder."""
     try:
@@ -50,12 +65,13 @@ def process_email(account, email_folder, output_dir, time_frame):
 
 def process_email_item(account, item, output_dir):
     """Process a single email item."""
-    recipient_name = item.to_recipients[0].name if item.to_recipients else 'Unknown_Recipient'
+    recipient_name = sanitize_filename(item.to_recipients[0].name) if item.to_recipients else 'Unknown_Recipient'
     subject = sanitize_filename(item.subject) if item.subject else 'No_Subject'
-    email_out = f"{output_dir}to_{recipient_name} - {subject} - {item.datetime_received.strftime('%I-%M%p %m-%d%Y')}"
-
+    received_time = item.datetime_received.strftime('%m-%d-%Y_%I-%M%p')
+    email_out = f"to_{recipient_name} - {subject} - {received_time}"
+    
     # Save the email contents to a file named email.html
-    email_filename = f"{email_out}.html"
+    email_filename = f"{output_dir}{email_out}.html"
     try:
         with open(email_filename, 'w', encoding='utf-8') as f:
             f.write(f"<html><body>\n")
@@ -64,14 +80,17 @@ def process_email_item(account, item, output_dir):
             f.write(f"<p><strong>Sender:</strong> {item.sender.email_address}</p>\n")
             to_addresses = ', '.join([r.email_address for r in item.to_recipients if r.email_address])
             f.write(f"<p><strong>To:</strong> {to_addresses}</p>\n")
+            
+            # Replace 'cid:' URLs in the email body
+            sanitized_body = replace_cid_urls(item.body, email_out, output_dir)
             f.write(f"<p><strong>Body:</strong></p>\n")
-            f.write(f"{item.body}\n")
+            f.write(f"{sanitized_body}\n")
             f.write(f"</body></html>\n")
     except Exception as e:
         logging.error(f"Error writing email file {email_filename}: {str(e)}")
-
+    
     # Save attachments
-    attachment_dir = f"{output_dir}{sanitize_filename(recipient_name)}/"
+    attachment_dir = f"{output_dir}{email_out}_attachments/"
     Path(attachment_dir).mkdir(parents=True, exist_ok=True)
     for attachment in item.attachments:
         if isinstance(attachment, FileAttachment):
@@ -86,7 +105,8 @@ def process_email_item(account, item, output_dir):
             try:
                 attached_item = attachment.item
                 attached_subject = sanitize_filename(attached_item.subject)
-                attached_email_filename = f"{attachment_dir}attached_email_{attached_subject}_{attached_item.datetime_received.strftime('%Y%m%d%H%M%S')}.html"
+                attached_received_time = attached_item.datetime_received.strftime('%m-%d-%Y_%I-%M%p')
+                attached_email_filename = f"{attachment_dir}attached_{attached_subject}_{attached_received_time}.html"
                 with open(attached_email_filename, 'w', encoding='utf-8') as f:
                     f.write(f"<html><body>\n")
                     f.write(f"<h1>Subject: {attached_item.subject}</h1>\n")
@@ -97,6 +117,8 @@ def process_email_item(account, item, output_dir):
                     f.write(f"</body></html>\n")
             except Exception as e:
                 logging.error(f"Error saving attached email: {str(e)}")
+    
+    return email_out
 
 def main():
     # Load configuration from environment variables

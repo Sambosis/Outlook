@@ -131,14 +131,11 @@ body {
     z-index: 1000;
 }
 
-
 .attachments-header {
     color: #495057;
     font-size: 1.1rem;
     margin-bottom: 0.75rem;
 }
-
-
 
 .attachment-container {
     display: flex;
@@ -148,11 +145,6 @@ body {
     overflow-y: auto;
     padding: 0.5rem;
 }
-
-
-
-
-
 
 .attachment-item {
     display: inline-flex;
@@ -180,11 +172,9 @@ body {
 /* Make sure email content doesn't push attachments too far down */
 
 .email-content {
-    margin-bottom: 150px; /* Make space for attachments section *   /
+    margin-bottom: 150px; /* Make space for attachments section */
     padding-bottom: 1rem;
 }
-
-
 
 /* Responsive adjustments */
 @media (max-width: 768px) {

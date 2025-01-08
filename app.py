@@ -79,60 +79,64 @@ def process_email(account, email_folder, output_dir, time_frame):
         logging.error(f"Too many objects error: {e}")
 # @pysnooper.snoop("ouput.log")
 def process_email_item(account, item, output_dir):
-    # Generate a unique email_id from the datetime and subject
-    email_id = f"{item.datetime_received.strftime('%Y%m%d%H%M%S')}_{hash(item.subject)}"
-    
+    """Process a single email item."""
     recipient_name = item.to_recipients[0].name if item.to_recipients else 'Unknown_Recipient'
     subject = sanitize_filename(item.subject) if item.subject else 'No_Subject'
-    email_out = f"to_{recipient_name} - {subject} - {item.datetime_received.strftime('%I-%M%p %m-%d%Y')}"
-    email_filename = os.path.join(EMAIL_DIR, f"{email_out}.html")
-    attachment_dir = os.path.join(EMAIL_DIR, email_id + "_attachments")
+    date_str = item.datetime_received.strftime('%m-%d-%Y_%I-%M%p')
+
+    # Define base name for files and attachments
+    base_name = f"to_{recipient_name} - {subject} - {date_str}"
+
+    # Construct paths
+    email_filename = os.path.join(EMAIL_DIR, f"{base_name}.html")
+    attachment_dir = os.path.join(EMAIL_DIR, f"{base_name}_attachments")
+
     try:
         with open(email_filename, 'w', encoding='utf-8') as f:
-            f.write(f"<html><body>\n")
+            f.write("<html><body>\n")
             f.write(f"<h1>Subject: {item.subject}</h1>\n")
             f.write(f"<p><strong>Received:</strong> {item.datetime_received}</p>\n")
             f.write(f"<p><strong>Sender:</strong> {item.sender.email_address}</p>\n")
             to_addresses = ', '.join([r.email_address for r in item.to_recipients if r.email_address])
             f.write(f"<p><strong>To:</strong> {to_addresses}</p>\n")
-            f.write(f"<p><strong>Body:</strong></p>\n")
+            f.write("<p><strong>Body:</strong></p>\n")
             f.write(f"{item.body}\n")
-            f.write(f"</body></html>\n")
+            f.write("</body></html>\n")
     except Exception as e:
         logging.error(f"Error writing email file {email_filename}: {str(e)}")
 
+    # If attachments exist, store them under the base_name_attachments folder
+    if item.attachments:
+        Path(attachment_dir).mkdir(parents=True, exist_ok=True)
+        for attachment in item.attachments:
+            if isinstance(attachment, FileAttachment):
+                safe_attachment_name = sanitize_filename(attachment.name)
+                attachment_path = os.path.join(attachment_dir, safe_attachment_name)
+                try:
+                    with open(attachment_path, 'wb') as f:
+                        f.write(attachment.content)
+                except Exception as e:
+                    logging.error(f"Error saving attachment {attachment.name}: {str(e)}")
+            elif isinstance(attachment, ItemAttachment):
+                try:
+                    attached_item = attachment.item
+                    attached_subject = sanitize_filename(attached_item.subject)
+                    attached_file = os.path.join(
+                        attachment_dir,
+                        f"attached_email_{attached_subject}_{attached_item.datetime_received.strftime('%Y%m%d%H%M%S')}.html"
+                    )
+                    with open(attached_file, 'w', encoding='utf-8') as f:
+                        f.write("<html><body>\n")
+                        f.write(f"<h1>Subject: {attached_item.subject}</h1>\n")
+                        f.write(f"<p><strong>Received:</strong> {attached_item.datetime_received}</p>\n")
+                        f.write(f"<p><strong>Sender:</strong> {attached_item.sender.email_address}</p>\n")
+                        f.write("<p><strong>Body:</strong></p>\n")
+                        f.write(f"{attached_item.body}\n")
+                        f.write("</body></html>\n")
+                except Exception as e:
+                    logging.error(f"Error saving attached email: {str(e)}")
 
-
-    Path(attachment_dir).mkdir(parents=True, exist_ok=True)
-    for attachment in item.attachments:
-        if isinstance(attachment, FileAttachment):
-            safe_attachment_name = sanitize_filename(attachment.name)
-            attachment_filename = os.path.join(attachment_dir, safe_attachment_name)
-            try:
-                with open(attachment_filename, 'wb') as f:
-                    f.write(attachment.content)
-            except Exception as e:
-                logging.error(f"Error saving attachment {attachment.name}: {str(e)}")
-        elif isinstance(attachment, ItemAttachment):
-            try:
-                attached_item = attachment.item
-                attached_subject = sanitize_filename(attached_item.subject)
-                attached_email_filename = os.path.join(
-                    attachment_dir,
-                    f"attached_email_{attached_subject}_{attached_item.datetime_received.strftime('%Y%m%d%H%M%S')}.html"
-                )
-                with open(attached_email_filename, 'w', encoding='utf-8') as f:
-                    f.write(f"<html><body>\n")
-                    f.write(f"<h1>Subject: {attached_item.subject}</h1>\n")
-                    f.write(f"<p><strong>Received:</strong> {attached_item.datetime_received}</p>\n")
-                    f.write(f"<p><strong>Sender:</strong> {attached_item.sender.email_address}</p>\n")
-                    f.write(f"<p><strong>Body:</strong></p>\n")
-                    f.write(f"{attached_item.body}\n")
-                    f.write(f"</body></html>\n")
-            except Exception as e:
-                logging.error(f"Error saving attached email: {str(e)}")
-
-    return email_filename
+    return base_name
 
 def setup_exchange_connection():
     """Setup Exchange connection using environment variables."""
@@ -209,7 +213,7 @@ def index():
         # Sort emails by datetime_received in descending order
         recent_emails.sort(key=lambda x: x['datetime_received'], reverse=True)
         
-        # Take only the 10 most recent emails
+        # Take only the 100 most recent emails
         recent_emails = recent_emails[:100]
         
         # Format the datetime for display
@@ -282,19 +286,27 @@ def search():
 @app.route('/view/<path:filename>')
 def view(filename):
     try:
-        # Ensure the path is within EMAIL_DIR
         full_path = os.path.join(EMAIL_DIR, filename)
         full_path = os.path.normpath(full_path)
-        print(full_path)
+        
         if not full_path.startswith(os.path.normpath(EMAIL_DIR)):
-            abort(403)  # Forbidden if trying to access outside EMAIL_DIR
+            abort(403)
             
         if not os.path.exists(full_path):
-            abort(404)  # Not found
+            abort(404)
             
-        # Read and return the file content
         with open(full_path, 'r', encoding='utf-8') as f:
             content = f.read()
+            # Extract attachment directory name based on email filename
+            attachment_dir_match = re.match(r'(.*)\.html$', filename)
+            if attachment_dir_match:
+                base_name = attachment_dir_match.group(1)
+                attachment_dir = f"{base_name}_attachments/"
+                # Optionally, verify if attachment directory exists
+                attachments_path = os.path.join(EMAIL_DIR, attachment_dir)
+                if os.path.exists(attachments_path):
+                    # You can modify the content to include attachment links if needed
+                    pass
             return content
             
     except Exception as e:
@@ -323,37 +335,32 @@ def download_attachment(filename):
         logging.error(f"Error downloading attachment: {str(e)}")
         abort(500)
 
-@app.route('/list-attachments/<path:email_id>')
-def list_attachments(email_id):
-    logging.info(f"Listing attachments for email ID: {email_id}")
+@app.route('/list-attachments/<path:email_path>')
+def list_attachments(email_path):
     try:
-        attachment_dir = os.path.join(EMAIL_DIR, email_id + "_attachments")
+        # Remove .html extension to get base path
+        email_base = email_path.rsplit('.', 1)[0]
         
-        if not os.path.exists(attachment_dir):
-            return jsonify({'attachments': []})
-
-        attachments = []
-        for file in os.listdir(attachment_dir):
-            file_path = os.path.join(attachment_dir, file)
-            if os.path.isfile(file_path) and not file.endswith('.html'):
-                attachments.append({
-                    'filename': file,
-                    'path': f'/attachments/{email_id + "_attachments"}/{file}',
-                    'size': os.path.getsize(file_path)
-                })
-        return jsonify({'attachments': attachments})
+        attachment_dir = f"{email_base}_attachments/"
+        attachment_full_path = os.path.join(EMAIL_DIR, attachment_dir)
+        
+        if os.path.exists(attachment_full_path):
+            attachments = []
+            for file in os.listdir(attachment_full_path):
+                file_path = os.path.join(attachment_full_path, file)
+                if os.path.isfile(file_path):
+                    attachments.append({
+                        'filename': file,
+                        'path': f'/attachments/{attachment_dir}{file}',
+                        'size': os.path.getsize(file_path)
+                    })
+            logging.debug(f"Found {len(attachments)} attachments")
+            return jsonify({'attachments': attachments})
+        
+        return jsonify({'attachments': []})
     except Exception as e:
         logging.error(f"Error listing attachments: {str(e)}")
         return jsonify({'attachments': []})
-
-# @app.route('/attachments/<path:sender_name>/<path:filename>')
-# def download_attachment(sender_name, filename):
-#     try:
-#         directory = os.path.join(EMAIL_DIR, sender_name)
-#         return send_from_directory(directory, filename, as_attachment=True)
-#     except Exception as e:
-#         logging.error(f"Error downloading attachment: {str(e)}")
-#         abort(404)
 
 @app.route('/check-emails', methods=['POST'])
 def check_emails():
@@ -374,6 +381,26 @@ def check_emails():
     except Exception as e:
         logging.error(f"Failed to check emails: {str(e)}")
         return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route('/attachments/<path:filename>')
+def serve_attachment(filename):
+    """Serve attachment files securely."""
+    try:
+        full_path = os.path.join(EMAIL_DIR, filename)
+        full_path = os.path.normpath(full_path)
+        
+        if not full_path.startswith(os.path.normpath(EMAIL_DIR)):
+            abort(403)  # Forbidden if trying to access outside EMAIL_DIR
+            
+        if not os.path.exists(full_path):
+            abort(404)
+        
+        directory = os.path.dirname(full_path)
+        file = os.path.basename(full_path)
+        return send_from_directory(directory, file, as_attachment=True)
+    except Exception as e:
+        logging.error(f"Error serving attachment {filename}: {str(e)}")
+        abort(500)
 
 if __name__ == '__main__':
     # When running the Flask app, you might also want to process emails

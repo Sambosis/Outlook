@@ -15,5 +15,11 @@
         </li>
     {% endfor %}
     </ul>
+
+    <div class="result-item" data-path="{{ email.path }}">
+        <h5 class="mb-1">{{ email.subject }}</h5>
+        <p class="email-snippet mb-0">{{ email.snippet }}</p>
+        <small class="text-muted">{{ email.datetime_received }}</small>
+    </div>
 </body>
 </html>
