@@ -313,7 +313,7 @@ def view(filename):
         logging.error(f"Error reading email file: {str(e)}")
         abort(500)
 
-@app.route('/attachments/<path:filename>')
+@app.route('/gpg2/<path:filename>')
 def download_attachment(filename):
     """Enhanced route to download attachments with security checks"""
     if '..' in filename or filename.startswith('/'):
@@ -351,7 +351,7 @@ def list_attachments(email_path):
                 if os.path.isfile(file_path):
                     attachments.append({
                         'filename': file,
-                        'path': f'/attachments/{attachment_dir}{file}',
+                        'path': f'/gpg2/{attachment_dir}{file}',
                         'size': os.path.getsize(file_path)
                     })
             logging.debug(f"Found {len(attachments)} attachments")
@@ -382,7 +382,7 @@ def check_emails():
         logging.error(f"Failed to check emails: {str(e)}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route('/attachments/<path:filename>')
+@app.route('/gpg2/<path:filename>')
 def serve_attachment(filename):
     """Serve attachment files securely."""
     try:

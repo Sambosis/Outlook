@@ -46,10 +46,10 @@ def replace_cid_urls(body, email_out, output_dir):
     def cid_replacer(match):
         cid = match.group(1)
         # Assuming the cid corresponds to the attachment filename
-        attachment_url = f"/attachments/{email_out}_attachments/{cid}"
+        attachment_url = f"/gpg2/{email_out}_attachments/{cid}"
         return f'src="{attachment_url}"'
     
-    # Replace all src="cid:filename" with src="/attachments/.../filename"
+    # Replace all src="cid:filename" with src="/gpg2/.../filename"
     pattern = r'src=["\']cid:(.*?)["\']'
     replaced_body = re.sub(pattern, cid_replacer, body, flags=re.IGNORECASE)
     return replaced_body
@@ -90,6 +90,7 @@ def process_email_item(account, item, output_dir):
         logging.error(f"Error writing email file {email_filename}: {str(e)}")
     
     # Save attachments
+    # shows up on heroku as https://outlook-4463a5c16936.herokuapp.com/gpg2/to_Branch%20650%20Operations%20Group%20-%20FW_%20Invoice%20#%20429637%20112650%20-%2001-07-2025_09-52PM_attachments/<attachment_name>
     attachment_dir = f"{output_dir}{email_out}_attachments/"
     Path(attachment_dir).mkdir(parents=True, exist_ok=True)
     for attachment in item.attachments:
