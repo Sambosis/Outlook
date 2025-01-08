@@ -6,7 +6,7 @@ EXCHANGE_SERVER='london.autochlor.net'
 EXCHANGE_VERSION='Exchange2016'
 OUTPUT_DIR='gpg2/'
 TIMEZONE='US/Eastern'
-DAYS_AGO=7
+DAYS_AGO=5
 
 import os
 import re
