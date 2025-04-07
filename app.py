@@ -14,6 +14,7 @@ from icecream import ic
 from waitress import serve
 from dotenv import load_dotenv
 import sys
+from api_wrapper import ensure_json_response, json_response
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -228,6 +229,7 @@ def index():
         return render_template('index.html', emails=[])
 
 @app.route('/search')
+@ensure_json_response
 def search():
     print()
     query = request.args.get('query', '').strip()
@@ -349,6 +351,7 @@ def download_attachment(filename):
         abort(500)
 
 @app.route('/list-attachments/<path:email_path>')
+@ensure_json_response
 def list_attachments(email_path):
     try:
         # Remove .html extension to get base path
@@ -368,35 +371,43 @@ def list_attachments(email_path):
                         'size': os.path.getsize(file_path)
                     })
             logging.debug(f"Found {len(attachments)} attachments")
-            return jsonify({'attachments': attachments})
+            return {'attachments': attachments}
         
-        return jsonify({'attachments': []})
+        return {'attachments': []}
     except Exception as e:
         logging.error(f"Error listing attachments: {str(e)}")
-        return jsonify({'error': str(e), 'attachments': []}), 500
+        return json_response(success=False, message=f"Error listing attachments: {str(e)}", status_code=500)
 
 @app.route('/check-emails', methods=['POST'])
+@ensure_json_response
 def check_emails():
     try:
         account, output_dir, time_frame = setup_exchange_connection()
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         
+        processed_sent = 0
+        processed_inbox = 0
+        
         # Process emails
         logging.info("Processing sent emails...")
         for _ in process_email(account, account.sent, output_dir, time_frame):
-            pass
+            processed_sent += 1
             
         logging.info("Processing inbox emails...")
         for _ in process_email(account, account.inbox, output_dir, time_frame):
-            pass
+            processed_inbox += 1
             
-        return jsonify({"success": True, "message": "Emails checked successfully"})
+        return json_response(
+            success=True, 
+            message=f"Emails checked successfully. Processed {processed_sent} sent and {processed_inbox} inbox emails.",
+            data={"sent": processed_sent, "inbox": processed_inbox}
+        )
     except JSONDecodeError as e:
         logging.error(f"JSON decode error: {str(e)}")
-        return jsonify({"success": False, "message": f"JSON decode error: {str(e)}"}), 500
+        return json_response(success=False, message=f"JSON decode error: {str(e)}", status_code=500)
     except Exception as e:
         logging.error(f"Failed to check emails: {str(e)}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        return json_response(success=False, message=f"Failed to check emails: {str(e)}", status_code=500)
 
 @app.route('/gpg2/<path:filename>')
 def serve_attachment(filename):

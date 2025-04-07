@@ -101,7 +101,10 @@ $(document).ready(function () {
         $.ajax({
             url: '/list-attachments/' + encodeURIComponent(emailBase),
             method: 'GET',
-            dataType: 'json',
+            dataType: 'json',  // Expect JSON response
+            headers: {
+                'Accept': 'application/json'  // Explicitly ask for JSON
+            },
             success: function (response) {
                 if (response.attachments && response.attachments.length > 0) {
                     let attachmentsHtml = '<h4>Attachments:</h4><ul>';
@@ -116,7 +119,15 @@ $(document).ready(function () {
             },
             error: function (xhr, status, error) {
                 console.error('Error fetching attachments:', error);
-                $('#attachment-list').html('<p>Error loading attachments.</p>');
+                
+                // Try to determine if we received HTML instead of JSON
+                if (xhr.responseText && xhr.responseText.trim().startsWith('<!DOCTYPE') || 
+                    xhr.responseText.trim().startsWith('<html')) {
+                    console.error('Received HTML instead of JSON:', xhr.responseText.substring(0, 500));
+                    $('#attachment-list').html('<p>Error: Received HTML instead of JSON. See console for details.</p>');
+                } else {
+                    $('#attachment-list').html('<p>Error loading attachments.</p>');
+                }
             }
         });
     }
@@ -130,4 +141,57 @@ $(document).ready(function () {
             $('#results').addClass('d-none');
             $('.recent-emails').removeClass('d-none');
         });
+});
+
+// Add event listener for checking emails
+document.getElementById('check-emails-btn').addEventListener('click', async function() {
+    const button = this;
+    const spinner = button.querySelector('.spinner-border');
+    
+    // Disable button and show spinner
+    button.disabled = true;
+    spinner.classList.remove('d-none');
+    
+    try {
+        const response = await fetch('/check-emails', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'  // Explicitly ask for JSON
+            }
+        });
+        
+        // First check if the response is JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            // Try to get the response as text to see what we received
+            const htmlContent = await response.text();
+            console.error('Received non-JSON response:', htmlContent.substring(0, 500));
+            throw new Error('Server returned non-JSON response. The response might contain HTML content instead of JSON.');
+        }
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Show success message before reloading
+            const messageContainer = document.createElement('div');
+            messageContainer.className = 'alert alert-success';
+            messageContainer.innerHTML = data.message || 'Emails checked successfully.';
+            document.querySelector('.check-emails-container').appendChild(messageContainer);
+            
+            // Remove message after 3 seconds and reload page
+            setTimeout(() => {
+                window.location.reload();
+            }, 3000);
+        } else {
+            alert('Error checking emails: ' + (data.message || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Check emails error:', error);
+        alert('Error checking emails: ' + error.message);
+    } finally {
+        // Re-enable button and hide spinner
+        button.disabled = false;
+        spinner.classList.add('d-none');
+    }
 });

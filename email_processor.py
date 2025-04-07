@@ -66,16 +66,35 @@ def process_email(account, email_folder, output_dir, time_frame):
     try:
         for item in email_folder.filter(datetime_received__gte=time_frame).order_by('-datetime_received'):
             if isinstance(item, Message):
-                yield process_email_item(account, item, output_dir)
+                try:
+                    yield process_email_item(account, item, output_dir)
+                except Exception as e:
+                    logging.error(f"Error processing individual email: {str(e)}")
+                    yield f"error_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     except ErrorTooManyObjectsOpened as e:
         logging.error(f"Too many objects error: {e}")
+    except Exception as e:
+        logging.error(f"Unexpected error in email processing: {str(e)}")
+        yield f"error_{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
 def process_email_item(account, item, output_dir):
     """Process a single email item."""
     try:
+        # Defensive programming: validate inputs
+        if not item:
+            logging.error("Received empty item to process")
+            return f"error_empty_item_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            
         recipient_name = sanitize_filename(item.to_recipients[0].name) if item.to_recipients else 'Unknown_Recipient'
         subject = sanitize_filename(item.subject) if item.subject else 'No_Subject'
-        received_time = item.datetime_received.strftime('%m-%d-%Y_%I-%M%p')
+        
+        # Ensure datetime_received exists and is valid
+        if not hasattr(item, 'datetime_received') or not item.datetime_received:
+            received_time = datetime.now().strftime('%m-%d-%Y_%I-%M%p')
+            logging.warning(f"Item missing datetime_received, using current time: {received_time}")
+        else:
+            received_time = item.datetime_received.strftime('%m-%d-%Y_%I-%M%p')
+            
         email_out = f"to_{recipient_name} - {subject} - {received_time}"
         
         # Save the email contents to a file named email.html
@@ -85,12 +104,20 @@ def process_email_item(account, item, output_dir):
                 f.write(f"<html><body>\n")
                 f.write(f"<h1>Subject: {item.subject}</h1>\n")
                 f.write(f"<p><strong>Received:</strong> {item.datetime_received}</p>\n")
-                f.write(f"<p><strong>Sender:</strong> {item.sender.email_address}</p>\n")
-                to_addresses = ', '.join([r.email_address for r in item.to_recipients if r.email_address])
-                f.write(f"<p><strong>To:</strong> {to_addresses}</p>\n")
                 
-                # Replace 'cid:' URLs in the email body
-                body_content = item.body if item.body else ""
+                # Handle potential null sender
+                sender_email = item.sender.email_address if hasattr(item, 'sender') and item.sender else 'Unknown'
+                f.write(f"<p><strong>Sender:</strong> {sender_email}</p>\n")
+                
+                # Handle recipients
+                if hasattr(item, 'to_recipients') and item.to_recipients:
+                    to_addresses = ', '.join([r.email_address for r in item.to_recipients if hasattr(r, 'email_address')])
+                    f.write(f"<p><strong>To:</strong> {to_addresses}</p>\n")
+                else:
+                    f.write("<p><strong>To:</strong> Unknown Recipients</p>\n")
+                
+                # Handle body content safely
+                body_content = item.body if hasattr(item, 'body') and item.body else ""
                 sanitized_body = replace_cid_urls(body_content, email_out, output_dir)
                 f.write(f"<p><strong>Body:</strong></p>\n")
                 f.write(f"{sanitized_body}\n")
