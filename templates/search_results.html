@@ -1,25 +1,22 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Search Results</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- Assuming you might want Bootstrap styling consistent with index.html -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-    <h1>Search Results for "{{ query }}"</h1>
-    <ul>
-    {% for result in results %}
-        <li>
-            <a href="{{ url_for('view', filename=result.path) }}">{{ result.name }}</a>
-            <p>{{ result.content | safe }}</p>
-        </li>
-    {% endfor %}
-    </ul>
-
-    <div class="result-item" data-path="{{ email.path }}">
-        <h5 class="mb-1">{{ email.subject }}</h5>
-        <p class="email-snippet mb-0">{{ email.snippet }}</p>
-        <small class="text-muted">{{ email.datetime_received }}</small>
-    </div>
-</body>
-</html>
+    <h4 class="mb-3">Search Results for "{{ query }}"</h4>
+    {% if results %}
+        <div class="list-group">
+        {% for result in results %}
+            <!-- Use the same structure as index.html for consistency -->
+            <div class="list-group-item result-item" data-path="{{ result.path }}">
+                <h5 class="mb-1">{{ result.subject }}</h5>
+                <p class="mb-1"><strong>From:</strong> {{ result.sender }}</p>
+                <!-- Optional: Display snippet if needed -->
+                <!-- <p class="email-snippet mb-0">{{ result.snippet }}</p> -->
+                <small class="text-muted

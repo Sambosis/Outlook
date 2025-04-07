@@ -240,42 +240,53 @@ def search():
             for file in files:
                 if file.endswith('.html'):
                     file_path = os.path.join(root, file)
-                    # print(f"Checking file: {file_path}")  # Debug print
+                    relative_path = os.path.relpath(file_path, EMAIL_DIR).replace('\\', '/')
                     
-                    relative_path = os.path.relpath(file_path, EMAIL_DIR)
                     try:
                         with open(file_path, 'r', encoding='utf-8') as f:
                             content = f.read()
                             if query.lower() in content.lower():
-                                # Extract datetime like in index route
+                                # Extract metadata using regex
+                                subject_match = re.search(r'<h1>Subject: (.*?)</h1>', content)
+                                sender_match = re.search(r'<p><strong>Sender:</strong> (.*?)</p>', content)
                                 datetime_match = re.search(r'<p><strong>Received:</strong> (.*?)</p>', content)
-                                if datetime_match:
+                                
+                                # Get metadata or default values
+                                subject = subject_match.group(1) if subject_match else 'No Subject'
+                                sender = sender_match.group(1) if sender_match else 'Unknown Sender'
+                                datetime_str = datetime_match.group(1) if datetime_match else None
+                                
+                                dt = None
+                                if datetime_str:
                                     try:
-                                        dt = datetime.fromisoformat(datetime_match.group(1).replace('Z', '+00:00'))
-                                        formatted_dt = dt.strftime('%m/%d/%Y %I:%M %p')
+                                        dt = datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
                                     except ValueError:
-                                        formatted_dt = ''
+                                        dt = datetime.fromtimestamp(os.path.getmtime(file_path))
                                 else:
-                                    formatted_dt = ''
+                                    dt = datetime.fromtimestamp(os.path.getmtime(file_path))
 
+                                # Extract snippet
                                 snippet_start = content.lower().find(query.lower())
                                 snippet = content[max(0, snippet_start-50):snippet_start+150] + '...'
-                                snippet = re.sub('<[^<]+?>', '', snippet)
+                                snippet = re.sub('<[^<]+?>', '', snippet) # Basic HTML tag removal for snippet
+
                                 results.append({
-                                    'path': relative_path.replace('\\', '/'),
-                                    'name': file,
-                                    'snippet': snippet,
-                                    'datetime': formatted_dt
+                                    'path': relative_path,
+                                    'subject': subject,
+                                    'sender': sender,
+                                    'datetime_obj': dt, # Store datetime object for sorting
+                                    'snippet': snippet # Keep snippet if needed, or remove if unused
                                 })
                     except Exception as e:
                         print(f"Error reading file {file_path}: {str(e)}")
 
-        # Sort results by datetime in descending order
-        results.sort(key=lambda x: x.get('datetime', ''), reverse=True)
+        # Sort results by datetime object in descending order
+        results.sort(key=lambda x: x['datetime_obj'], reverse=True)
         
-        # Remove datetime from results before sending (not needed by frontend)
+        # Format datetime for display and remove the object
         for result in results:
-            del result['datetime']
+            result['datetime_received'] = result['datetime_obj'].strftime('%m/%d/%Y %I:%M %p')
+            del result['datetime_obj']
             
         return jsonify({"results": results})
     
