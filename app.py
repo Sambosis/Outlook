@@ -2,6 +2,8 @@
 import re
 import os
 import logging
+import json
+from json.decoder import JSONDecodeError
 from flask import Flask, render_template, request, jsonify, send_from_directory, abort
 from datetime import datetime, timedelta
 from exchangelib import Credentials, Account, DELEGATE, Message, FileAttachment, ItemAttachment, Configuration
@@ -389,6 +391,9 @@ def check_emails():
             pass
             
         return jsonify({"success": True, "message": "Emails checked successfully"})
+    except JSONDecodeError as e:
+        logging.error(f"JSON decode error: {str(e)}")
+        return jsonify({"success": False, "message": f"JSON decode error: {str(e)}"}), 500
     except Exception as e:
         logging.error(f"Failed to check emails: {str(e)}")
         return jsonify({"success": False, "message": str(e)}), 500
