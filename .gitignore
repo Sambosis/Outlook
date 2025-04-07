@@ -9,4 +9,4 @@ wheels/
 .venv
 ignore/
 archive/
-gpg2/*.*
+gpg2/
