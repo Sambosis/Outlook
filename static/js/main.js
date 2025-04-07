@@ -28,34 +28,44 @@ $(document).ready(function () {
             data: { query: query },
             success: function (response) {
                 console.log('Search response:', response); // Debug log
-                $('#results').empty();
+                $('#results').empty(); // Clear previous results or "Searching..." message
+
+                if (response.error) {
+                    console.error('Search error from server:', response.error);
+                    $('#results').html(`<div class="alert alert-danger">Error: ${response.error}</div>`);
+                    return;
+                }
 
                 if (!response.results || response.results.length === 0) {
                     $('#results').html('<p class="text-center">No results found.</p>');
                     return;
                 }
 
-                // Update search results display to include datetime
+                // Update search results display using the new fields
                 response.results.forEach(function (item) {
-                    // Extract datetime from filename format "...- HH-MMAM/PM MM-DDYYYY.html"
-                    let datetimeMatch = item.name.match(/(\d{2}-\d{2}[AP]M \d{2}-\d{2}\d{4})\.html$/);
-                    let datetime = datetimeMatch ? datetimeMatch[1] : '';
-                    
+                    // Use the structure consistent with recent emails in index.html
                     let resultHtml = `
-                        <div class="result-item" data-path="${item.path}">
-                            <h5 class="mb-1">${item.name}</h5>
-                            <p class="email-snippet mb-0">${item.snippet}</p>
-                            <small class="text-muted">${datetime}</small>
+                        <div class="list-group-item result-item" data-path="${item.path}">
+                            <h5 class="mb-1">${item.subject}</h5>
+                            <p class="mb-1"><strong>From:</strong> ${item.sender}</p>
+                            <small class="text-muted">${item.datetime_received}</small>
                         </div>
                     `;
                     $('#results').append(resultHtml);
                 });
             },
-            error: function (error) {
-                console.error('Search error:', error); // Debug log
+            error: function (xhr, status, error) { // Use xhr, status, error for more details
+                console.error('Search AJAX error:', status, error); // Debug log
+                let errorMsg = `Error performing search: ${error}`;
+                if (xhr.responseJSON && xhr.responseJSON.error) {
+                    errorMsg = `Error performing search: ${xhr.responseJSON.error}`;
+                } else if (xhr.responseText) {
+                    // Try to show more specific error if available
+                    errorMsg = `Error performing search: ${xhr.status} ${xhr.statusText}`;
+                }
                 $('#results').html(`
                     <div class="alert alert-danger">
-                        Error performing search: ${error}
+                        ${errorMsg}
                     </div>
                 `);
             }
@@ -74,16 +84,14 @@ $(document).ready(function () {
             method: 'GET',
             success: function (data) {
                 $('#email-content').html(data);
-                $('.result-item').removeClass('active');
+                $('.result-item').removeClass('active'); // Ensure active class is managed correctly
                 $clickedItem.addClass('active');
                 // Load attachments after email content is loaded
-                let emailBase = filePath.replace('.html', '');
-                displayAttachments(emailBase); // Update to use emailBase instead of emailId
+                displayAttachments(filePath); // Pass the full relative path
             },
             error: function (xhr, status, error) {
                 console.error('Error loading email:', error);
-                $('#email-content').html('<div class="alert alert-danger"> Error loading email content. Please try again. </div>');
-                $('#attachment-list').html('');
+                $('#email-content').html('<p class="text-danger">Error loading email content.</p>');
             }
         });
     });
@@ -91,7 +99,7 @@ $(document).ready(function () {
     // Function to display attachments
     function displayAttachments(emailBase) {
         $.ajax({
-            url: '/list-attachments/' + encodeURIComponent(emailBase + '.html'),
+            url: '/list-attachments/' + encodeURIComponent(emailBase),
             method: 'GET',
             success: function (response) {
                 if (response.attachments && response.attachments.length > 0) {
