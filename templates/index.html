@@ -91,6 +91,12 @@
                 }
             });
             
+            // First check if the response is JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                throw new Error('Server returned non-JSON response. The response might contain HTML content instead of JSON.');
+            }
+            
             const data = await response.json();
             
             if (data.success) {
@@ -100,6 +106,7 @@
                 alert('Error checking emails: ' + data.message);
             }
         } catch (error) {
+            console.error('Check emails error:', error);
             alert('Error checking emails: ' + error.message);
         } finally {
             // Re-enable button and hide spinner

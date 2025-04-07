@@ -43,16 +43,23 @@ def replace_cid_urls(body, email_out, output_dir):
     """
     Replace 'cid:' URLs in the email body with valid HTTP URLs pointing to attachment files.
     """
-    def cid_replacer(match):
-        cid = match.group(1)
-        # Assuming the cid corresponds to the attachment filename
-        attachment_url = f"/gpg2/{email_out}_attachments/{cid}"
-        return f'src="{attachment_url}"'
-    
-    # Replace all src="cid:filename" with src="/gpg2/.../filename"
-    pattern = r'src=["\']cid:(.*?)["\']'
-    replaced_body = re.sub(pattern, cid_replacer, body, flags=re.IGNORECASE)
-    return replaced_body
+    if body is None:
+        return ""
+        
+    try:
+        def cid_replacer(match):
+            cid = match.group(1)
+            # Assuming the cid corresponds to the attachment filename
+            attachment_url = f"/gpg2/{email_out}_attachments/{cid}"
+            return f'src="{attachment_url}"'
+        
+        # Replace all src="cid:filename" with src="/gpg2/.../filename"
+        pattern = r'src=["\']cid:(.*?)["\']'
+        replaced_body = re.sub(pattern, cid_replacer, body, flags=re.IGNORECASE)
+        return replaced_body
+    except Exception as e:
+        logging.error(f"Error replacing CID URLs: {str(e)}")
+        return body if body else ""
 
 def process_email(account, email_folder, output_dir, time_frame):
     """Process emails in the specified folder."""
@@ -65,61 +72,65 @@ def process_email(account, email_folder, output_dir, time_frame):
 
 def process_email_item(account, item, output_dir):
     """Process a single email item."""
-    recipient_name = sanitize_filename(item.to_recipients[0].name) if item.to_recipients else 'Unknown_Recipient'
-    subject = sanitize_filename(item.subject) if item.subject else 'No_Subject'
-    received_time = item.datetime_received.strftime('%m-%d-%Y_%I-%M%p')
-    email_out = f"to_{recipient_name} - {subject} - {received_time}"
-    
-    # Save the email contents to a file named email.html
-    email_filename = f"{output_dir}{email_out}.html"
     try:
-        with open(email_filename, 'w', encoding='utf-8') as f:
-            f.write(f"<html><body>\n")
-            f.write(f"<h1>Subject: {item.subject}</h1>\n")
-            f.write(f"<p><strong>Received:</strong> {item.datetime_received}</p>\n")
-            f.write(f"<p><strong>Sender:</strong> {item.sender.email_address}</p>\n")
-            to_addresses = ', '.join([r.email_address for r in item.to_recipients if r.email_address])
-            f.write(f"<p><strong>To:</strong> {to_addresses}</p>\n")
-            
-            # Replace 'cid:' URLs in the email body
-            sanitized_body = replace_cid_urls(item.body, email_out, output_dir)
-            f.write(f"<p><strong>Body:</strong></p>\n")
-            f.write(f"{sanitized_body}\n")
-            f.write(f"</body></html>\n")
+        recipient_name = sanitize_filename(item.to_recipients[0].name) if item.to_recipients else 'Unknown_Recipient'
+        subject = sanitize_filename(item.subject) if item.subject else 'No_Subject'
+        received_time = item.datetime_received.strftime('%m-%d-%Y_%I-%M%p')
+        email_out = f"to_{recipient_name} - {subject} - {received_time}"
+        
+        # Save the email contents to a file named email.html
+        email_filename = f"{output_dir}{email_out}.html"
+        try:
+            with open(email_filename, 'w', encoding='utf-8') as f:
+                f.write(f"<html><body>\n")
+                f.write(f"<h1>Subject: {item.subject}</h1>\n")
+                f.write(f"<p><strong>Received:</strong> {item.datetime_received}</p>\n")
+                f.write(f"<p><strong>Sender:</strong> {item.sender.email_address}</p>\n")
+                to_addresses = ', '.join([r.email_address for r in item.to_recipients if r.email_address])
+                f.write(f"<p><strong>To:</strong> {to_addresses}</p>\n")
+                
+                # Replace 'cid:' URLs in the email body
+                body_content = item.body if item.body else ""
+                sanitized_body = replace_cid_urls(body_content, email_out, output_dir)
+                f.write(f"<p><strong>Body:</strong></p>\n")
+                f.write(f"{sanitized_body}\n")
+                f.write(f"</body></html>\n")
+        except Exception as e:
+            logging.error(f"Error writing email file {email_filename}: {str(e)}")
+        
+        # Save attachments
+        attachment_dir = f"{output_dir}{email_out}_attachments/"
+        Path(attachment_dir).mkdir(parents=True, exist_ok=True)
+        for attachment in item.attachments:
+            if isinstance(attachment, FileAttachment):
+                safe_attachment_name = sanitize_filename(attachment.name)
+                attachment_filename = f"{attachment_dir}{safe_attachment_name}"
+                try:
+                    with open(attachment_filename, 'wb') as f:
+                        f.write(attachment.content)
+                except Exception as e:
+                    logging.error(f"Error saving attachment {attachment.name}: {str(e)}")
+            elif isinstance(attachment, ItemAttachment):
+                try:
+                    attached_item = attachment.item
+                    attached_subject = sanitize_filename(attached_item.subject)
+                    attached_received_time = attached_item.datetime_received.strftime('%m-%d-%Y_%I-%M%p')
+                    attached_email_filename = f"{attachment_dir}attached_{attached_subject}_{attached_received_time}.html"
+                    with open(attached_email_filename, 'w', encoding='utf-8') as f:
+                        f.write(f"<html><body>\n")
+                        f.write(f"<h1>Subject: {attached_item.subject}</h1>\n")
+                        f.write(f"<p><strong>Received:</strong> {attached_item.datetime_received}</p>\n")
+                        f.write(f"<p><strong>Sender:</strong> {attached_item.sender.email_address}</p>\n")
+                        f.write(f"<p><strong>Body:</strong></p>\n")
+                        f.write(f"{attached_item.body}\n")
+                        f.write(f"</body></html>\n")
+                except Exception as e:
+                    logging.error(f"Error saving attached email: {str(e)}")
+        
+        return email_out
     except Exception as e:
-        logging.error(f"Error writing email file {email_filename}: {str(e)}")
-    
-    # Save attachments
-    # shows up on heroku as https://outlook-4463a5c16936.herokuapp.com/gpg2/to_Branch%20650%20Operations%20Group%20-%20FW_%20Invoice%20#%20429637%20112650%20-%2001-07-2025_09-52PM_attachments/<attachment_name>
-    attachment_dir = f"{output_dir}{email_out}_attachments/"
-    Path(attachment_dir).mkdir(parents=True, exist_ok=True)
-    for attachment in item.attachments:
-        if isinstance(attachment, FileAttachment):
-            safe_attachment_name = sanitize_filename(attachment.name)
-            attachment_filename = f"{attachment_dir}{safe_attachment_name}"
-            try:
-                with open(attachment_filename, 'wb') as f:
-                    f.write(attachment.content)
-            except Exception as e:
-                logging.error(f"Error saving attachment {attachment.name}: {str(e)}")
-        elif isinstance(attachment, ItemAttachment):
-            try:
-                attached_item = attachment.item
-                attached_subject = sanitize_filename(attached_item.subject)
-                attached_received_time = attached_item.datetime_received.strftime('%m-%d-%Y_%I-%M%p')
-                attached_email_filename = f"{attachment_dir}attached_{attached_subject}_{attached_received_time}.html"
-                with open(attached_email_filename, 'w', encoding='utf-8') as f:
-                    f.write(f"<html><body>\n")
-                    f.write(f"<h1>Subject: {attached_item.subject}</h1>\n")
-                    f.write(f"<p><strong>Received:</strong> {attached_item.datetime_received}</p>\n")
-                    f.write(f"<p><strong>Sender:</strong> {attached_item.sender.email_address}</p>\n")
-                    f.write(f"<p><strong>Body:</strong></p>\n")
-                    f.write(f"{attached_item.body}\n")
-                    f.write(f"</body></html>\n")
-            except Exception as e:
-                logging.error(f"Error saving attached email: {str(e)}")
-    
-    return email_out
+        logging.error(f"Error processing email: {str(e)}")
+        return f"error_{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
 def main():
     # Load configuration from environment variables

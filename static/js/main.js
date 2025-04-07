@@ -101,6 +101,7 @@ $(document).ready(function () {
         $.ajax({
             url: '/list-attachments/' + encodeURIComponent(emailBase),
             method: 'GET',
+            dataType: 'json',
             success: function (response) {
                 if (response.attachments && response.attachments.length > 0) {
                     let attachmentsHtml = '<h4>Attachments:</h4><ul>';
@@ -113,7 +114,7 @@ $(document).ready(function () {
                     $('#attachment-list').html('<p>No attachments found.</p>');
                 }
             },
-            error: function (error) {
+            error: function (xhr, status, error) {
                 console.error('Error fetching attachments:', error);
                 $('#attachment-list').html('<p>Error loading attachments.</p>');
             }

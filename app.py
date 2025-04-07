@@ -373,7 +373,7 @@ def list_attachments(email_path):
         return jsonify({'attachments': []})
     except Exception as e:
         logging.error(f"Error listing attachments: {str(e)}")
-        return jsonify({'attachments': []})
+        return jsonify({'error': str(e), 'attachments': []}), 500
 
 @app.route('/check-emails', methods=['POST'])
 def check_emails():
