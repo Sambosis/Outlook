@@ -15,3 +15,10 @@ dependencies = [
     "waitress==3.0.2",
     "requests==2.32.2",
 ]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
