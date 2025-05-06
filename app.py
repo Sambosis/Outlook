@@ -56,6 +56,16 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 app = Flask(__name__, static_folder='static')
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    code = getattr(e, 'code', 500)
+    # Optionally log the full traceback here if needed
+    return jsonify({
+        "success": False,
+        "message": str(e),
+        "error": type(e).__name__
+    }), code
+
 # Directory where emails are stored
 EMAIL_DIR = 'gpg2/'  # Ensure this path is correct
 # sys.exit(1)
