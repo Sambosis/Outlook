@@ -166,7 +166,7 @@ document.getElementById('check-emails-btn').addEventListener('click', async func
         if (!contentType || !contentType.includes('application/json')) {
             // Try to get the response as text to see what we received
             const htmlContent = await response.text();
-            console.error('Received non-JSON response:', htmlContent.substring(0, 500));
+            console.error('Received non-JSON response:', htmlContent.substring(0, 1500));
             throw new Error('Server returned non-JSON response. The response might contain HTML content instead of JSON.');
         }
         
