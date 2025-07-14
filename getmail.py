@@ -37,11 +37,11 @@ account = Account(
 
 # Calculate the date 30 days ago with timezone awareness
 local_tz = pytz.timezone('US/Eastern')  # Replace with your timezone, e.g., 'UTC', 'US/Eastern', etc.
-sent_time_frame = local_tz.localize(datetime.now() - timedelta(days=10))
+sent_time_frame = local_tz.localize(datetime.now() - timedelta(days=2))
 
 local_tz = pytz.timezone('US/Eastern') 
 
-from_time_frame= local_tz.localize(datetime.now() - timedelta(days=10))
+from_time_frame= local_tz.localize(datetime.now() - timedelta(days=2))
 
 # Ensure the output directory exists
 output_dir = f'gpg2/'
