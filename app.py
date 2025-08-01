@@ -4,7 +4,7 @@ import os
 import logging
 import json
 from json.decoder import JSONDecodeError
-from flask import Flask, render_template, request, jsonify, send_from_directory, abort
+from flask import Flask, render_template, request, jsonify, send_from_directory, abort, send_file
 from datetime import datetime, timedelta
 from exchangelib import Credentials, Account, DELEGATE, Message, FileAttachment, ItemAttachment, Configuration
 from exchangelib.errors import ErrorTooManyObjectsOpened
@@ -14,6 +14,9 @@ from icecream import ic
 from waitress import serve
 from dotenv import load_dotenv
 import sys
+import zipfile
+import tempfile
+import shutil
 from api_wrapper import ensure_json_response, json_response
 
 # Configure logging
@@ -437,6 +440,52 @@ def serve_attachment(filename):
         return send_from_directory(directory, file, as_attachment=True)
     except Exception as e:
         logging.error(f"Error serving attachment {filename}: {str(e)}")
+        abort(500)
+
+@app.route('/download-all-emails')
+def download_all_emails():
+    """Create and serve a zip file containing all emails and attachments."""
+    try:
+        # Create a temporary file for the zip
+        temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+        temp_zip.close()
+        
+        with zipfile.ZipFile(temp_zip.name, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # Walk through the EMAIL_DIR and add all files
+            for root, dirs, files in os.walk(EMAIL_DIR):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Create the archive path relative to EMAIL_DIR
+                    archive_path = os.path.relpath(file_path, EMAIL_DIR)
+                    zipf.write(file_path, archive_path)
+        
+        # Generate filename with current timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        zip_filename = f"all_emails_{timestamp}.zip"
+        
+        def cleanup_temp_file():
+            """Clean up the temporary file after sending."""
+            try:
+                os.unlink(temp_zip.name)
+            except:
+                pass
+        
+        # Send the file and clean up afterwards
+        return send_file(
+            temp_zip.name,
+            as_attachment=True,
+            download_name=zip_filename,
+            mimetype='application/zip'
+        )
+        
+    except Exception as e:
+        logging.error(f"Error creating zip file: {str(e)}")
+        # Clean up temp file if it exists
+        try:
+            if 'temp_zip' in locals():
+                os.unlink(temp_zip.name)
+        except:
+            pass
         abort(500)
 
 if __name__ == '__main__':

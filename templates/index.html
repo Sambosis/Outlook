@@ -26,9 +26,13 @@
                     </form>
                 </div>
                 <div class="check-emails-container">
-                    <button id="check-emails-btn" class="btn btn-success w-100">
+                    <button id="check-emails-btn" class="btn btn-success w-100 mb-2">
                         <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
                         Check for New Emails
+                    </button>
+                    <button id="download-all-btn" class="btn btn-primary w-100">
+                        <i class="bi bi-download"></i>
+                        Download All Emails
                     </button>
                 </div>
                 <div id="results" class="d-none">
@@ -113,6 +117,35 @@
             button.disabled = false;
             spinner.classList.add('d-none');
         }
+    });
+
+    // Add event listener for download all emails button
+    document.getElementById('download-all-btn').addEventListener('click', function() {
+        const button = this;
+        const originalText = button.innerHTML;
+        
+        // Disable button and show loading state
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Preparing Download...';
+        
+        // Create a temporary link to trigger download
+        const link = document.createElement('a');
+        link.href = '/download-all-emails';
+        link.download = '';
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        
+        // Trigger the download
+        link.click();
+        
+        // Clean up
+        document.body.removeChild(link);
+        
+        // Re-enable button after a short delay
+        setTimeout(() => {
+            button.disabled = false;
+            button.innerHTML = originalText;
+        }, 2000);
     });
 
     // Update the attachment loading JavaScript
