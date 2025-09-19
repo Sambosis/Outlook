@@ -32,7 +32,9 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    inspect,
     or_,
+    text,
 )
 from sqlalchemy.orm import (
     declarative_base,
@@ -127,6 +129,71 @@ class Attachment(Base):
 
 
 Base.metadata.create_all(engine)
+
+
+def ensure_database_schema(target_engine):
+    """Ensure required columns exist on legacy databases without migrations."""
+
+    inspector = inspect(target_engine)
+
+    def ensure_created_at(table_name):
+        if table_name not in inspector.get_table_names():
+            return
+
+        columns = {column['name'] for column in inspector.get_columns(table_name)}
+        if 'created_at' in columns:
+            return
+
+        with target_engine.begin() as connection:
+            dialect_name = target_engine.dialect.name
+            if dialect_name == 'postgresql':
+                connection.execute(
+                    text(
+                        f"ALTER TABLE {table_name} "
+                        "ADD COLUMN created_at TIMESTAMPTZ DEFAULT timezone('UTC', now())"
+                    )
+                )
+                connection.execute(
+                    text(
+                        f"UPDATE {table_name} "
+                        "SET created_at = timezone('UTC', now()) "
+                        "WHERE created_at IS NULL"
+                    )
+                )
+            elif dialect_name == 'sqlite':
+                connection.execute(
+                    text(
+                        f"ALTER TABLE {table_name} "
+                        "ADD COLUMN created_at TIMESTAMP"
+                    )
+                )
+                connection.execute(
+                    text(
+                        f"UPDATE {table_name} "
+                        "SET created_at = CURRENT_TIMESTAMP "
+                        "WHERE created_at IS NULL"
+                    )
+                )
+            else:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE {table_name} "
+                        "ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                    )
+                )
+                connection.execute(
+                    text(
+                        f"UPDATE {table_name} "
+                        "SET created_at = CURRENT_TIMESTAMP "
+                        "WHERE created_at IS NULL"
+                    )
+                )
+
+    ensure_created_at('emails')
+    ensure_created_at('attachments')
+
+
+ensure_database_schema(engine)
 
 
 @contextmanager
