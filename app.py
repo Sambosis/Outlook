@@ -3,6 +3,7 @@ import io
 import logging
 import os
 import re
+import threading
 import zipfile
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -90,7 +91,15 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///emails.db')
 if DATABASE_URL.startswith('postgres://'):
     DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+connect_args = {}
+if DATABASE_URL.startswith('postgresql://') and 'sslmode=' not in DATABASE_URL:
+    connect_args['sslmode'] = os.getenv('DATABASE_SSLMODE', 'require')
+
+engine_kwargs = {'pool_pre_ping': True}
+if connect_args:
+    engine_kwargs['connect_args'] = connect_args
+
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = scoped_session(sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False))
 Base = declarative_base()
 
@@ -126,9 +135,6 @@ class Attachment(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     email = relationship('Email', back_populates='attachments')
-
-
-Base.metadata.create_all(engine)
 
 
 def ensure_database_schema(target_engine):
@@ -193,11 +199,35 @@ def ensure_database_schema(target_engine):
     ensure_created_at('attachments')
 
 
-ensure_database_schema(engine)
+_db_init_lock = threading.Lock()
+_db_initialized = False
+
+
+def initialize_database(force: bool = False):
+    """Create required tables and backfill schema gaps."""
+
+    global _db_initialized
+
+    if _db_initialized and not force:
+        return
+
+    with _db_init_lock:
+        if _db_initialized and not force:
+            return
+
+        with engine.begin() as connection:
+            Base.metadata.create_all(bind=connection)
+
+        ensure_database_schema(engine)
+        _db_initialized = True
+
+
+initialize_database()
 
 
 @contextmanager
 def session_scope():
+    initialize_database()
     session = SessionLocal()
     try:
         yield session
@@ -207,6 +237,7 @@ def session_scope():
         raise
     finally:
         session.close()
+        SessionLocal.remove()
 
 
 app = Flask(__name__, static_folder='static')
