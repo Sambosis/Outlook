@@ -43,9 +43,8 @@ $(document).ready(function () {
 
                 // Update search results display using the new fields
                 response.results.forEach(function (item) {
-                    // Use the structure consistent with recent emails in index.html
                     let resultHtml = `
-                        <div class="list-group-item result-item" data-path="${item.path}">
+                        <div class="list-group-item result-item" data-email-id="${item.id}">
                             <h5 class="mb-1">${item.subject}</h5>
                             <p class="mb-1"><strong>From:</strong> ${item.sender}</p>
                             <small class="text-muted">${item.datetime_received}</small>
@@ -75,19 +74,19 @@ $(document).ready(function () {
     // Delegate event handler for result items (works for dynamically added elements)
     $(document).on('click', '.result-item', function () {
         let $clickedItem = $(this);
-        let filePath = $(this).data('path');
+        let emailId = $(this).data('emailId');
         $('#email-content').html('<p class="text-center"><i>Loading...</i></p>');
         $('#attachment-list').html('<p class="text-center"><i>Loading attachments...</i></p>');
         // Load email content
         $.ajax({
-            url: '/view/' + encodeURIComponent(filePath),
+            url: '/email/' + encodeURIComponent(emailId),
             method: 'GET',
             success: function (data) {
                 $('#email-content').html(data);
                 $('.result-item').removeClass('active'); // Ensure active class is managed correctly
                 $clickedItem.addClass('active');
                 // Load attachments after email content is loaded
-                displayAttachments(filePath); // Pass the full relative path
+                displayAttachments(emailId);
             },
             error: function (xhr, status, error) {
                 console.error('Error loading email:', error);
@@ -97,9 +96,9 @@ $(document).ready(function () {
     });
 
     // Function to display attachments
-    function displayAttachments(emailBase) {
+    function displayAttachments(emailId) {
         $.ajax({
-            url: '/list-attachments/' + encodeURIComponent(emailBase),
+            url: '/attachments/' + encodeURIComponent(emailId),
             method: 'GET',
             dataType: 'json',  // Expect JSON response
             headers: {
@@ -109,7 +108,7 @@ $(document).ready(function () {
                 if (response.attachments && response.attachments.length > 0) {
                     let attachmentsHtml = '<h4>Attachments:</h4><ul>';
                     response.attachments.forEach(function (attachment) {
-                        attachmentsHtml += `<li><a href="${attachment.path}" download>${attachment.filename}</a></li>`;
+                        attachmentsHtml += `<li><a href="${attachment.download_url}" download>${attachment.filename}</a></li>`;
                     });
                     attachmentsHtml += '</ul>';
                     $('#attachment-list').html(attachmentsHtml);

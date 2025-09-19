@@ -43,7 +43,7 @@
                     {% if emails %}
                         <div class="list-group">
                         {% for email in emails %}
-                            <div class="list-group-item result-item" data-path="{{ email.path }}">
+                            <div class="list-group-item result-item" data-email-id="{{ email.id }}">
                                 <h5 class="mb-1">{{ email.subject }}</h5>
                                 <p class="mb-1"><strong>From:</strong> {{ email.sender }}</p>
                                 <small class="text-muted">{{ email.datetime_received }}</small>
@@ -153,7 +153,7 @@
         const attachmentList = document.getElementById('attachment-list');
         attachmentList.innerHTML = '<p class="text-center"><i>Loading attachments...</i></p>';
 
-        fetch(`/list-attachments/${emailId}`)
+        fetch(`/attachments/${emailId}`)
             .then(response => {
                 if (!response.ok) {
                     throw new Error('Network response was not ok');
@@ -165,9 +165,9 @@
                     attachmentList.innerHTML = '<p class="text-muted">No attachments</p>';
                     return;
                 }
-                
+
                 attachmentList.innerHTML = data.attachments.map(att => `
-                    <a href="${att.path}" class="attachment-item" download>
+                    <a href="${att.download_url}" class="attachment-item" download>
                         <i class="bi bi-file-earmark"></i>
                         <span class="ms-2">${att.filename}</span>
                         <small class="text-muted ms-2">(${formatBytes(att.size)})</small>
