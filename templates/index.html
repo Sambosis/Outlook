@@ -43,7 +43,7 @@
                     {% if emails %}
                         <div class="list-group">
                         {% for email in emails %}
-                            <div class="list-group-item result-item" data-path="{{ email.path }}">
+                            <div class="list-group-item result-item" data-email-id="{{ email.id }}">
                                 <h5 class="mb-1">{{ email.subject }}</h5>
                                 <p class="mb-1"><strong>From:</strong> {{ email.sender }}</p>
                                 <small class="text-muted">{{ email.datetime_received }}</small>

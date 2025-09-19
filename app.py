@@ -1,22 +1,48 @@
 # app.py    
-import re
-import os
+import io
 import logging
-import json
-from json.decoder import JSONDecodeError
-from flask import Flask, render_template, request, jsonify, send_from_directory, abort, send_file
-from datetime import datetime, timedelta
-from exchangelib import Credentials, Account, DELEGATE, Message, FileAttachment, ItemAttachment, Configuration
-from exchangelib.errors import ErrorTooManyObjectsOpened
-import pytz
-from pathlib import Path
-from icecream import ic 
-from waitress import serve
-from dotenv import load_dotenv
-import sys
+import os
+import re
 import zipfile
-import tempfile
-import shutil
+from contextlib import contextmanager
+from datetime import datetime, timedelta
+from html import escape
+from json.decoder import JSONDecodeError
+from pathlib import Path
+
+import pytz
+from dotenv import load_dotenv
+from exchangelib import Account, Configuration, Credentials, DELEGATE, FileAttachment, ItemAttachment, Message
+from exchangelib.errors import ErrorTooManyObjectsOpened
+from flask import (
+    Flask,
+    abort,
+    jsonify,
+    render_template,
+    request,
+    send_file,
+)
+from werkzeug.exceptions import HTTPException
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    create_engine,
+    or_,
+)
+from sqlalchemy.orm import (
+    declarative_base,
+    relationship,
+    scoped_session,
+    selectinload,
+    sessionmaker,
+)
+from waitress import serve
+
 from api_wrapper import ensure_json_response, json_response
 
 # Configure logging
@@ -57,6 +83,65 @@ except ValueError as e:
 # Ensure output directory exists
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# Database setup
+DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///emails.db')
+if DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+SessionLocal = scoped_session(sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False))
+Base = declarative_base()
+
+
+def utcnow():
+    return datetime.now(pytz.UTC)
+
+
+class Email(Base):
+    __tablename__ = 'emails'
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(String(255), unique=True, index=True)
+    subject = Column(Text)
+    sender = Column(String(255))
+    recipients = Column(Text)
+    datetime_received = Column(DateTime(timezone=True))
+    body = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    attachments = relationship('Attachment', back_populates='email', cascade='all, delete-orphan')
+
+
+class Attachment(Base):
+    __tablename__ = 'attachments'
+
+    id = Column(Integer, primary_key=True)
+    email_id = Column(Integer, ForeignKey('emails.id', ondelete='CASCADE'), index=True)
+    filename = Column(Text)
+    content_type = Column(String(255))
+    data = Column(LargeBinary)
+    size = Column(Integer)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    email = relationship('Email', back_populates='attachments')
+
+
+Base.metadata.create_all(engine)
+
+
+@contextmanager
+def session_scope():
+    session = SessionLocal()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 app = Flask(__name__, static_folder='static')
 
 @app.errorhandler(Exception)
@@ -69,90 +154,153 @@ def handle_exception(e):
         "error": type(e).__name__
     }), code
 
-# Directory where emails are stored
-EMAIL_DIR = 'gpg2/'  # Ensure this path is correct
-# sys.exit(1)
 def sanitize_filename(filename):
     """Sanitize the filename by removing or replacing invalid characters."""
-    print()
     invalid_chars = r'[<>:"/\\|?*\x00-\x1f]'
-    filename = re.sub(invalid_chars, '_', filename)
+    filename = re.sub(invalid_chars, '_', filename or '')
     filename = filename.rstrip('. ')
     if not filename:
         filename = 'unnamed'
-    if len(filename) > 245:  
+    if len(filename) > 245:
         filename = filename[:245]
     return filename
 
-def process_email(account, email_folder, output_dir, time_frame):
-    """Process emails in the specified folder."""
-    print()
+
+def build_email_html(email_record):
+    """Create an HTML representation of an email stored in the database."""
+    subject = email_record.subject or 'No Subject'
+    received = email_record.datetime_received.isoformat() if email_record.datetime_received else 'Unknown'
+    sender = email_record.sender or 'Unknown Sender'
+    recipients = email_record.recipients or 'Unknown'
+    body = email_record.body or ''
+
+    if body.strip():
+        if re.search(r'<[^>]+>', body):
+            body_html = body
+        else:
+            body_html = f"<pre>{escape(body)}</pre>"
+    else:
+        body_html = '<p><em>No body content</em></p>'
+
+    return (
+        "<html><body\n"
+        f"<h1>Subject: {escape(subject)}</h1>\n"
+        f"<p><strong>Received:</strong> {escape(received)}</p>\n"
+        f"<p><strong>Sender:</strong> {escape(sender)}</p>\n"
+        f"<p><strong>To:</strong> {escape(recipients)}</p>\n"
+        "<p><strong>Body:</strong></p>\n"
+        f"{body_html}\n"
+        "</body></html>\n"
+    )
+
+
+
+def get_message_identifier(item):
+    identifier = getattr(item, 'message_id', None)
+    if identifier:
+        return identifier
+    return getattr(item, 'item_id', None)
+
+
+def process_email(account, email_folder, session, time_frame):
+    """Process emails in the specified folder and persist them to the database."""
     try:
-        for item in email_folder.filter(datetime_received__gte=time_frame).order_by('-datetime_received'):
+        queryset = email_folder.filter(datetime_received__gte=time_frame).order_by('-datetime_received')
+        for item in queryset:
             if isinstance(item, Message):
-                yield process_email_item(account, item, output_dir)
+                yield process_email_item(item, session)
     except ErrorTooManyObjectsOpened as e:
         logging.error(f"Too many objects error: {e}")
-# @pysnooper.snoop("ouput.log")
-def process_email_item(account, item, output_dir):
-    """Process a single email item."""
-    recipient_name = item.to_recipients[0].name if item.to_recipients else 'Unknown_Recipient'
-    subject = sanitize_filename(item.subject) if item.subject else 'No_Subject'
-    date_str = item.datetime_received.strftime('%m-%d-%Y_%I-%M%p')
 
-    # Define base name for files and attachments
-    base_name = f"to_{recipient_name} - {subject} - {date_str}"
 
-    # Construct paths
-    email_filename = os.path.join(EMAIL_DIR, f"{base_name}.html")
-    attachment_dir = os.path.join(EMAIL_DIR, f"{base_name}_attachments")
+def process_email_item(item, session):
+    """Persist a single email item and its attachments."""
+    message_identifier = get_message_identifier(item)
+    if not message_identifier:
+        message_identifier = f"{item.subject}-{item.datetime_received}-{getattr(item, 'sender', '')}"
 
-    try:
-        with open(email_filename, 'w', encoding='utf-8') as f:
-            f.write("<html><body>\n")
-            f.write(f"<h1>Subject: {item.subject}</h1>\n")
-            f.write(f"<p><strong>Received:</strong> {item.datetime_received}</p>\n")
-            f.write(f"<p><strong>Sender:</strong> {item.sender.email_address}</p>\n")
-            to_addresses = ', '.join([r.email_address for r in item.to_recipients if r.email_address])
-            f.write(f"<p><strong>To:</strong> {to_addresses}</p>\n")
-            f.write("<p><strong>Body:</strong></p>\n")
-            f.write(f"{item.body}\n")
-            f.write("</body></html>\n")
-    except Exception as e:
-        logging.error(f"Error writing email file {email_filename}: {str(e)}")
+    existing = session.query(Email).filter(Email.message_id == message_identifier).first()
+    if existing:
+        return False
 
-    # If attachments exist, store them under the base_name_attachments folder
-    if item.attachments:
-        Path(attachment_dir).mkdir(parents=True, exist_ok=True)
+    recipients = ', '.join([
+        r.email_address or r.name
+        for r in (item.to_recipients or [])
+        if getattr(r, 'email_address', None) or getattr(r, 'name', None)
+    ])
+
+    email_record = Email(
+        message_id=message_identifier,
+        subject=item.subject,
+        sender=item.sender.email_address if item.sender else None,
+        recipients=recipients,
+        datetime_received=item.datetime_received,
+        body=str(item.body) if item.body is not None else None,
+    )
+    session.add(email_record)
+    session.flush()
+
+    if getattr(item, 'attachments', None):
         for attachment in item.attachments:
-            if isinstance(attachment, FileAttachment):
-                safe_attachment_name = sanitize_filename(attachment.name)
-                attachment_path = os.path.join(attachment_dir, safe_attachment_name)
-                try:
-                    with open(attachment_path, 'wb') as f:
-                        f.write(attachment.content)
-                except Exception as e:
-                    logging.error(f"Error saving attachment {attachment.name}: {str(e)}")
-            elif isinstance(attachment, ItemAttachment):
-                try:
-                    attached_item = attachment.item
-                    attached_subject = sanitize_filename(attached_item.subject)
-                    attached_file = os.path.join(
-                        attachment_dir,
-                        f"attached_email_{attached_subject}_{attached_item.datetime_received.strftime('%Y%m%d%H%M%S')}.html"
+            try:
+                if isinstance(attachment, FileAttachment):
+                    data = attachment.content or b''
+                    filename = sanitize_filename(attachment.name)
+                    session.add(
+                        Attachment(
+                            email_id=email_record.id,
+                            filename=filename,
+                            content_type=getattr(attachment, 'content_type', None),
+                            data=data,
+                            size=len(data),
+                        )
                     )
-                    with open(attached_file, 'w', encoding='utf-8') as f:
-                        f.write("<html><body>\n")
-                        f.write(f"<h1>Subject: {attached_item.subject}</h1>\n")
-                        f.write(f"<p><strong>Received:</strong> {attached_item.datetime_received}</p>\n")
-                        f.write(f"<p><strong>Sender:</strong> {attached_item.sender.email_address}</p>\n")
-                        f.write("<p><strong>Body:</strong></p>\n")
-                        f.write(f"{attached_item.body}\n")
-                        f.write("</body></html>\n")
-                except Exception as e:
-                    logging.error(f"Error saving attached email: {str(e)}")
+                elif isinstance(attachment, ItemAttachment):
+                    attached_item = attachment.item
+                    attached_subject = sanitize_filename(getattr(attached_item, 'subject', 'Attached Email'))
+                    received = getattr(attached_item, 'datetime_received', datetime.now(pytz.UTC))
+                    attached_filename = f"attached_email_{attached_subject}_{received.strftime('%Y%m%d%H%M%S')}.html"
+                    attached_body = getattr(attached_item, 'body', '')
+                    attached_sender = getattr(attached_item, 'sender', None)
+                    attached_sender_email = (
+                        attached_sender.email_address if getattr(attached_sender, 'email_address', None) else str(attached_sender)
+                    )
+                    attached_html = (
+                        "<html><body\n"
+                        f"<h1>Subject: {escape(getattr(attached_item, 'subject', 'No Subject'))}</h1>\n"
+                        f"<p><strong>Received:</strong> {escape(received.isoformat())}</p>\n"
+                        f"<p><strong>Sender:</strong> {escape(attached_sender_email or 'Unknown')}</p>\n"
+                        "<p><strong>Body:</strong></p>\n"
+                        f"{attached_body}\n"
+                        "</body></html>\n"
+                    ).encode('utf-8')
+                    session.add(
+                        Attachment(
+                            email_id=email_record.id,
+                            filename=attached_filename,
+                            content_type='text/html',
+                            data=attached_html,
+                            size=len(attached_html),
+                        )
+                    )
+            except Exception as exc:
+                logging.error(f"Error saving attachment: {exc}")
 
-    return base_name
+    return True
+
+
+def format_datetime(dt):
+    if not dt:
+        return 'Unknown'
+    try:
+        target_tz = pytz.timezone(TIMEZONE)
+        if dt.tzinfo is None:
+            dt = target_tz.localize(dt)
+        else:
+            dt = dt.astimezone(target_tz)
+        return dt.strftime('%m/%d/%Y %I:%M %p')
+    except Exception:
+        return dt.strftime('%m/%d/%Y %I:%M %p') if isinstance(dt, datetime) else str(dt)
 
 def setup_exchange_connection():
     """Setup Exchange connection using environment variables."""
@@ -190,203 +338,137 @@ def setup_exchange_connection():
 @app.route('/')
 def index():
     try:
-        # Get all HTML files in the output directory
-        recent_emails = []
-        for root, dirs, files in os.walk(EMAIL_DIR):
-            for file in files:
-                if file.endswith('.html'):
-                    file_path = os.path.join(root, file)
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            # Extract metadata using regex
-                            subject_match = re.search(r'<h1>Subject: (.*?)</h1>', content)
-                            sender_match = re.search(r'<p><strong>Sender:</strong> (.*?)</p>', content)
-                            datetime_match = re.search(r'<p><strong>Received:</strong> (.*?)</p>', content)
-                            
-                            # Get metadata or default values
-                            subject = subject_match.group(1) if subject_match else 'No Subject'
-                            sender = sender_match.group(1) if sender_match else 'Unknown Sender'
-                            datetime_str = datetime_match.group(1) if datetime_match else None
-                            
-                            if datetime_str:
-                                try:
-                                    dt = datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
-                                except ValueError:
-                                    dt = datetime.fromtimestamp(os.path.getmtime(file_path))
-                            else:
-                                dt = datetime.fromtimestamp(os.path.getmtime(file_path))
-                            
-                            recent_emails.append({
-                                'subject': subject,
-                                'sender': sender,
-                                'datetime_received': dt,
-                                'path': os.path.relpath(file_path, EMAIL_DIR)
-                            })
-                    except Exception as e:
-                        logging.error(f"Error reading email file {file_path}: {str(e)}")
-        
-        # Sort emails by datetime_received in descending order
-        recent_emails.sort(key=lambda x: x['datetime_received'], reverse=True)
-        
-        # Take only the 100 most recent emails
-        recent_emails = recent_emails[:100]
-        
-        # Format the datetime for display
-        for email in recent_emails:
-            email['datetime_received'] = email['datetime_received'].strftime('%m/%d/%Y %I:%M %p')
-        
-        return render_template('index.html', emails=recent_emails)
+        with session_scope() as session:
+            query = (
+                session.query(Email)
+                .order_by(Email.datetime_received.desc())
+                .limit(100)
+            )
+            recent_emails = []
+            for email in query:
+                recent_emails.append({
+                    'id': email.id,
+                    'subject': email.subject or 'No Subject',
+                    'sender': email.sender or 'Unknown Sender',
+                    'datetime_received': format_datetime(email.datetime_received),
+                })
+
+        default_content = "<p class='text-muted text-center'>Select an email to view its contents.</p>"
+        return render_template('index.html', emails=recent_emails, email_content=default_content)
     except Exception as e:
         logging.error(f"Error fetching recent emails: {str(e)}")
-        return render_template('index.html', emails=[])
+        default_content = "<p class='text-muted text-center'>Select an email to view its contents.</p>"
+        return render_template('index.html', emails=[], email_content=default_content)
 
 @app.route('/search')
 @ensure_json_response
 def search():
-    print()
     query = request.args.get('query', '').strip()
     if not query:
         return jsonify({"error": "No search query provided."}), 400
-    
-    print(f"Searching for: {query}")  # Debug print
-    
+
+    search_pattern = f"%{query}%"
+    lowercase_query = query.lower()
     results = []
+
     try:
-        for root, dirs, files in os.walk(EMAIL_DIR):
-            for file in files:
-                if file.endswith('.html'):
-                    file_path = os.path.join(root, file)
-                    relative_path = os.path.relpath(file_path, EMAIL_DIR).replace('\\', '/')
-                    
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                            if query.lower() in content.lower():
-                                # Extract metadata using regex
-                                subject_match = re.search(r'<h1>Subject: (.*?)</h1>', content)
-                                sender_match = re.search(r'<p><strong>Sender:</strong> (.*?)</p>', content)
-                                datetime_match = re.search(r'<p><strong>Received:</strong> (.*?)</p>', content)
-                                
-                                # Get metadata or default values
-                                subject = subject_match.group(1) if subject_match else 'No Subject'
-                                sender = sender_match.group(1) if sender_match else 'Unknown Sender'
-                                datetime_str = datetime_match.group(1) if datetime_match else None
-                                
-                                dt = None
-                                if datetime_str:
-                                    try:
-                                        dt = datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
-                                    except ValueError:
-                                        dt = datetime.fromtimestamp(os.path.getmtime(file_path))
-                                else:
-                                    dt = datetime.fromtimestamp(os.path.getmtime(file_path))
+        with session_scope() as session:
+            emails = (
+                session.query(Email)
+                .filter(
+                    or_(
+                        Email.subject.ilike(search_pattern),
+                        Email.sender.ilike(search_pattern),
+                        Email.recipients.ilike(search_pattern),
+                        Email.body.ilike(search_pattern),
+                    )
+                )
+                .order_by(Email.datetime_received.desc())
+                .all()
+            )
 
-                                # Extract snippet
-                                snippet_start = content.lower().find(query.lower())
-                                snippet = content[max(0, snippet_start-50):snippet_start+150] + '...'
-                                snippet = re.sub('<[^<]+?>', '', snippet) # Basic HTML tag removal for snippet
+            for email in emails:
+                body_text = email.body or ''
+                plain_text = re.sub('<[^<]+?>', '', body_text)
+                index = plain_text.lower().find(lowercase_query)
+                if index != -1:
+                    start = max(0, index - 50)
+                    snippet = plain_text[start:index + 150]
+                else:
+                    snippet = plain_text[:200]
+                if snippet:
+                    snippet = snippet.strip() + '...'
 
-                                results.append({
-                                    'path': relative_path,
-                                    'subject': subject,
-                                    'sender': sender,
-                                    'datetime_obj': dt, # Store datetime object for sorting
-                                    'snippet': snippet # Keep snippet if needed, or remove if unused
-                                })
-                    except Exception as e:
-                        print(f"Error reading file {file_path}: {str(e)}")
+                results.append({
+                    'id': email.id,
+                    'subject': email.subject or 'No Subject',
+                    'sender': email.sender or 'Unknown Sender',
+                    'datetime_received': format_datetime(email.datetime_received),
+                    'snippet': snippet,
+                })
 
-        # Sort results by datetime object in descending order
-        results.sort(key=lambda x: x['datetime_obj'], reverse=True)
-        
-        # Format datetime for display and remove the object
-        for result in results:
-            result['datetime_received'] = result['datetime_obj'].strftime('%m/%d/%Y %I:%M %p')
-            del result['datetime_obj']
-            
-        return jsonify({"results": results})
-    
+        return {"results": results}
+
     except Exception as e:
-        print(f"Search error: {str(e)}")  # Debug print
-        return jsonify({"error": str(e)}), 500
+        logging.error(f"Search error: {str(e)}")
+        return {"error": str(e)}, 500
 
-@app.route('/view/<path:filename>')
-def view(filename):
+@app.route('/view/<int:email_id>')
+def view(email_id):
     try:
-        full_path = os.path.join(EMAIL_DIR, filename)
-        full_path = os.path.normpath(full_path)
-        
-        if not full_path.startswith(os.path.normpath(EMAIL_DIR)):
-            abort(403)
-            
-        if not os.path.exists(full_path):
-            abort(404)
-            
-        with open(full_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-            # Extract attachment directory name based on email filename
-            attachment_dir_match = re.match(r'(.*)\.html$', filename)
-            if attachment_dir_match:
-                base_name = attachment_dir_match.group(1)
-                attachment_dir = f"{base_name}_attachments/"
-                # Optionally, verify if attachment directory exists
-                attachments_path = os.path.join(EMAIL_DIR, attachment_dir)
-                if os.path.exists(attachments_path):
-                    # You can modify the content to include attachment links if needed
-                    pass
-            return content
-            
+        with session_scope() as session:
+            email_record = session.get(Email, email_id)
+            if not email_record:
+                abort(404)
+            return build_email_html(email_record)
+    except HTTPException:
+        raise
     except Exception as e:
-        logging.error(f"Error reading email file: {str(e)}")
+        logging.error(f"Error retrieving email {email_id}: {str(e)}")
         abort(500)
 
-@app.route('/gpg2/<path:filename>')
-def download_attachment(filename):
-    """Enhanced route to download attachments with security checks"""
-    if '..' in filename or filename.startswith('/'):
-        abort(400, description="Invalid file path")
-        
-    full_path = os.path.join(EMAIL_DIR, filename)
-    full_path = os.path.normpath(full_path)
-    
-    if not full_path.startswith(os.path.normpath(EMAIL_DIR)):
-        abort(403)  # Forbidden if trying to access outside EMAIL_DIR
-        
+
+@app.route('/attachments/<int:attachment_id>/download')
+def download_attachment(attachment_id):
     try:
-        directory = os.path.dirname(full_path)
-        file = os.path.basename(full_path)
-        return send_from_directory(directory, file, as_attachment=True)
-    except FileNotFoundError:
-        abort(404, description="Attachment not found")
+        with session_scope() as session:
+            attachment = session.get(Attachment, attachment_id)
+            if not attachment:
+                abort(404)
+            file_data = attachment.data or b''
+            buffer = io.BytesIO(file_data)
+            buffer.seek(0)
+            return send_file(
+                buffer,
+                as_attachment=True,
+                download_name=attachment.filename or 'attachment',
+                mimetype=attachment.content_type or 'application/octet-stream',
+            )
+    except HTTPException:
+        raise
     except Exception as e:
-        logging.error(f"Error downloading attachment: {str(e)}")
+        logging.error(f"Error downloading attachment {attachment_id}: {str(e)}")
         abort(500)
 
-@app.route('/list-attachments/<path:email_path>')
+
+@app.route('/list-attachments/<int:email_id>')
 @ensure_json_response
-def list_attachments(email_path):
+def list_attachments(email_id):
     try:
-        # Remove .html extension to get base path
-        email_base = email_path.rsplit('.', 1)[0]
-        
-        attachment_dir = f"{email_base}_attachments/"
-        attachment_full_path = os.path.join(EMAIL_DIR, attachment_dir)
-        
-        if os.path.exists(attachment_full_path):
+        with session_scope() as session:
+            email_record = session.get(Email, email_id)
+            if not email_record:
+                return {'attachments': []}
+
             attachments = []
-            for file in os.listdir(attachment_full_path):
-                file_path = os.path.join(attachment_full_path, file)
-                if os.path.isfile(file_path):
-                    attachments.append({
-                        'filename': file,
-                        'path': f'/gpg2/{attachment_dir}{file}',
-                        'size': os.path.getsize(file_path)
-                    })
-            logging.debug(f"Found {len(attachments)} attachments")
+            for attachment in email_record.attachments:
+                attachments.append({
+                    'filename': attachment.filename,
+                    'path': f"/attachments/{attachment.id}/download",
+                    'size': attachment.size or (len(attachment.data) if attachment.data else 0),
+                })
+            logging.debug(f"Found {len(attachments)} attachments for email {email_id}")
             return {'attachments': attachments}
-        
-        return {'attachments': []}
     except Exception as e:
         logging.error(f"Error listing attachments: {str(e)}")
         return json_response(success=False, message=f"Error listing attachments: {str(e)}", status_code=500)
@@ -397,21 +479,23 @@ def check_emails():
     try:
         account, output_dir, time_frame = setup_exchange_connection()
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-        
+
         processed_sent = 0
         processed_inbox = 0
-        
-        # Process emails
-        logging.info("Processing sent emails...")
-        for _ in process_email(account, account.sent, output_dir, time_frame):
-            processed_sent += 1
-            
-        logging.info("Processing inbox emails...")
-        for _ in process_email(account, account.inbox, output_dir, time_frame):
-            processed_inbox += 1
-            
+
+        with session_scope() as session:
+            logging.info("Processing sent emails...")
+            for created in process_email(account, account.sent, session, time_frame):
+                if created:
+                    processed_sent += 1
+
+            logging.info("Processing inbox emails...")
+            for created in process_email(account, account.inbox, session, time_frame):
+                if created:
+                    processed_inbox += 1
+
         return json_response(
-            success=True, 
+            success=True,
             message=f"Emails checked successfully. Processed {processed_sent} sent and {processed_inbox} inbox emails.",
             data={"sent": processed_sent, "inbox": processed_inbox}
         )
@@ -422,71 +506,44 @@ def check_emails():
         logging.error(f"Failed to check emails: {str(e)}")
         return json_response(success=False, message=f"Failed to check emails: {str(e)}", status_code=500)
 
-@app.route('/gpg2/<path:filename>')
-def serve_attachment(filename):
-    """Serve attachment files securely."""
-    try:
-        full_path = os.path.join(EMAIL_DIR, filename)
-        full_path = os.path.normpath(full_path)
-        
-        if not full_path.startswith(os.path.normpath(EMAIL_DIR)):
-            abort(403)  # Forbidden if trying to access outside EMAIL_DIR
-            
-        if not os.path.exists(full_path):
-            abort(404)
-        
-        directory = os.path.dirname(full_path)
-        file = os.path.basename(full_path)
-        return send_from_directory(directory, file, as_attachment=True)
-    except Exception as e:
-        logging.error(f"Error serving attachment {filename}: {str(e)}")
-        abort(500)
-
 @app.route('/download-all-emails')
 def download_all_emails():
     """Create and serve a zip file containing all emails and attachments."""
     try:
-        # Create a temporary file for the zip
-        temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
-        temp_zip.close()
-        
-        with zipfile.ZipFile(temp_zip.name, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            # Walk through the EMAIL_DIR and add all files
-            for root, dirs, files in os.walk(EMAIL_DIR):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    # Create the archive path relative to EMAIL_DIR
-                    archive_path = os.path.relpath(file_path, EMAIL_DIR)
-                    zipf.write(file_path, archive_path)
-        
-        # Generate filename with current timestamp
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            with session_scope() as session:
+                emails = session.query(Email).options(selectinload(Email.attachments)).all()
+                for email_record in emails:
+                    recipient_display = (email_record.recipients or 'Unknown').split(',')[0].strip() or 'Unknown'
+                    subject_display = sanitize_filename(email_record.subject or 'No_Subject')
+                    if email_record.datetime_received:
+                        date_str = format_datetime(email_record.datetime_received).replace('/', '-').replace(' ', '_').replace(':', '-')
+                    else:
+                        date_str = 'Unknown_Date'
+                    base_name = sanitize_filename(f"to_{recipient_display} - {subject_display} - {date_str}")
+
+                    zipf.writestr(f"{base_name}.html", build_email_html(email_record))
+
+                    for attachment in email_record.attachments:
+                        filename = sanitize_filename(attachment.filename or 'attachment')
+                        attachment_path = f"{base_name}_attachments/{filename}"
+                        zipf.writestr(attachment_path, attachment.data or b'')
+
+        buffer.seek(0)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         zip_filename = f"all_emails_{timestamp}.zip"
-        
-        def cleanup_temp_file():
-            """Clean up the temporary file after sending."""
-            try:
-                os.unlink(temp_zip.name)
-            except:
-                pass
-        
-        # Send the file and clean up afterwards
         return send_file(
-            temp_zip.name,
+            buffer,
             as_attachment=True,
             download_name=zip_filename,
             mimetype='application/zip'
         )
-        
+
     except Exception as e:
         logging.error(f"Error creating zip file: {str(e)}")
-        # Clean up temp file if it exists
-        try:
-            if 'temp_zip' in locals():
-                os.unlink(temp_zip.name)
-        except:
-            pass
         abort(500)
+
 
 if __name__ == '__main__':
     # When running the Flask app, you might also want to process emails
@@ -495,12 +552,13 @@ if __name__ == '__main__':
     try:
         account, output_dir, time_frame = setup_exchange_connection()
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-        logging.info("Processing sent emails...")
-        for _ in process_email(account, account.sent, output_dir, time_frame):
-            pass
-        logging.info("Processing inbox emails...")
-        for _ in process_email(account, account.inbox, output_dir, time_frame):
-            pass
+        with session_scope() as session:
+            logging.info("Processing sent emails...")
+            for _ in process_email(account, account.sent, session, time_frame):
+                pass
+            logging.info("Processing inbox emails...")
+            for _ in process_email(account, account.inbox, session, time_frame):
+                pass
     except Exception as e:
         logging.error(f"Failed to setup Exchange connection or process emails: {str(e)}")
     

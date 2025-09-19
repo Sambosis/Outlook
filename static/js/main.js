@@ -43,9 +43,8 @@ $(document).ready(function () {
 
                 // Update search results display using the new fields
                 response.results.forEach(function (item) {
-                    // Use the structure consistent with recent emails in index.html
                     let resultHtml = `
-                        <div class="list-group-item result-item" data-path="${item.path}">
+                        <div class="list-group-item result-item" data-email-id="${item.id}">
                             <h5 class="mb-1">${item.subject}</h5>
                             <p class="mb-1"><strong>From:</strong> ${item.sender}</p>
                             <small class="text-muted">${item.datetime_received}</small>
@@ -75,19 +74,19 @@ $(document).ready(function () {
     // Delegate event handler for result items (works for dynamically added elements)
     $(document).on('click', '.result-item', function () {
         let $clickedItem = $(this);
-        let filePath = $(this).data('path');
+        let emailId = $(this).data('emailId');
         $('#email-content').html('<p class="text-center"><i>Loading...</i></p>');
         $('#attachment-list').html('<p class="text-center"><i>Loading attachments...</i></p>');
         // Load email content
         $.ajax({
-            url: '/view/' + encodeURIComponent(filePath),
+            url: '/view/' + emailId,
             method: 'GET',
             success: function (data) {
                 $('#email-content').html(data);
                 $('.result-item').removeClass('active'); // Ensure active class is managed correctly
                 $clickedItem.addClass('active');
                 // Load attachments after email content is loaded
-                displayAttachments(filePath); // Pass the full relative path
+                displayAttachments(emailId);
             },
             error: function (xhr, status, error) {
                 console.error('Error loading email:', error);
@@ -97,9 +96,9 @@ $(document).ready(function () {
     });
 
     // Function to display attachments
-    function displayAttachments(emailBase) {
+    function displayAttachments(emailId) {
         $.ajax({
-            url: '/list-attachments/' + encodeURIComponent(emailBase),
+            url: '/list-attachments/' + emailId,
             method: 'GET',
             dataType: 'json',  // Expect JSON response
             headers: {
@@ -107,26 +106,30 @@ $(document).ready(function () {
             },
             success: function (response) {
                 if (response.attachments && response.attachments.length > 0) {
-                    let attachmentsHtml = '<h4>Attachments:</h4><ul>';
-                    response.attachments.forEach(function (attachment) {
-                        attachmentsHtml += `<li><a href="${attachment.path}" download>${attachment.filename}</a></li>`;
-                    });
-                    attachmentsHtml += '</ul>';
+                    let attachmentsHtml = response.attachments.map(function (attachment) {
+                        return `
+                            <a href="${attachment.path}" class="attachment-item" download>
+                                <i class="bi bi-file-earmark"></i>
+                                <span class="ms-2">${attachment.filename}</span>
+                                <small class="text-muted ms-2">(${formatBytes(attachment.size)})</small>
+                            </a>
+                        `;
+                    }).join('');
                     $('#attachment-list').html(attachmentsHtml);
                 } else {
-                    $('#attachment-list').html('<p>No attachments found.</p>');
+                    $('#attachment-list').html('<p class="text-muted text-center">No attachments</p>');
                 }
             },
             error: function (xhr, status, error) {
                 console.error('Error fetching attachments:', error);
-                
+
                 // Try to determine if we received HTML instead of JSON
-                if (xhr.responseText && xhr.responseText.trim().startsWith('<!DOCTYPE') || 
+                if (xhr.responseText && xhr.responseText.trim().startsWith('<!DOCTYPE') ||
                     xhr.responseText.trim().startsWith('<html')) {
                     console.error('Received HTML instead of JSON:', xhr.responseText.substring(0, 500));
-                    $('#attachment-list').html('<p>Error: Received HTML instead of JSON. See console for details.</p>');
+                    $('#attachment-list').html('<p class="text-danger">Error: Received HTML instead of JSON. See console for details.</p>');
                 } else {
-                    $('#attachment-list').html('<p>Error loading attachments.</p>');
+                    $('#attachment-list').html('<p class="text-danger">Error loading attachments.</p>');
                 }
             }
         });

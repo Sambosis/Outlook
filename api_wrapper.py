@@ -28,7 +28,8 @@ def ensure_json_response(f):
             # If it's a tuple (data, status_code), handle it
             elif isinstance(result, tuple) and len(result) == 2:
                 data, status_code = result
-                # If data is not a dictionary, wrap it in a dictionary
+                if isinstance(data, Response):
+                    return data, status_code
                 if not isinstance(data, dict):
                     data = {"data": data}
                 return jsonify(data), status_code
