@@ -643,23 +643,55 @@ def download_all_emails():
         abort(500)
 
 
-if __name__ == '__main__':
-    # When running the Flask app, you might also want to process emails
-    # Uncomment the following lines if you want to process emails on startup
-    
+def check_emails_in_background():
+    """Check for emails in a background thread."""
     try:
-        account, output_dir, time_frame = setup_exchange_connection()
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        with session_scope() as session:
-            logging.info("Processing sent emails...")
-            for _ in process_email(account, account.sent, session, time_frame):
-                pass
-            logging.info("Processing inbox emails...")
-            for _ in process_email(account, account.inbox, session, time_frame):
-                pass
+        with app.app_context():
+            account, output_dir, time_frame = setup_exchange_connection()
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+            with session_scope() as session:
+                logging.info("Processing sent emails in background...")
+                for _ in process_email(account, account.sent, session, time_frame):
+                    pass
+
+                logging.info("Processing inbox emails in background...")
+                for _ in process_email(account, account.inbox, session, time_frame):
+                    pass
     except Exception as e:
-        logging.error(f"Failed to setup Exchange connection or process emails: {str(e)}")
+        logging.error(f"Failed to process emails in background: {str(e)}")
+
+def check_emails_in_background():
+    """Check for emails in a background thread."""
+    try:
+        with app.app_context():
+            account, output_dir, time_frame = setup_exchange_connection()
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+            with session_scope() as session:
+                logging.info("Processing sent emails in background...")
+                for _ in process_email(account, account.sent, session, time_frame):
+                    pass
+
+                logging.info("Processing inbox emails in background...")
+                for _ in process_email(account, account.inbox, session, time_frame):
+                    pass
+    except Exception as e:
+        logging.error(f"Failed to process emails in background: {str(e)}")
+
+def start_background_email_check():
+    """Start a background thread to check emails."""
+    logging.info("Starting background email check...")
+    thread = threading.Thread(target=check_emails_in_background)
+    thread.daemon = True
+    thread.start()
+
+
+if __name__ == '__main__':
+    # Start a background thread to check emails
+    start_background_email_check()
     
     print()
     # app.run(debug=True)
     serve(app, host='127.0.0.1', port=8080)
+``
